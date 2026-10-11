@@ -535,15 +535,16 @@ us-healthcare-warehouse/
 │   ├── phase2_guidelines.md
 │   └── bronze_silver_schema_contract.md
 ├── notebooks/
-│   ├── 00_setup_tables.py
+│   ├── 00_setup_tables.ipynb
 │   ├── 01_acquire_cms.ipynb
-│   ├── 02_raw_to_bronze.py
-│   ├── 03_bronze_to_silver.py
-│   ├── 04_migrate_silver_quarantine.py
-│   └── 99_demo_idempotency_drift_backfill.py
+│   ├── 02_raw_to_bronze.ipynb
+│   ├── 03_bronze_to_silver.ipynb
+│   ├── 04_migrate_silver_quarantine.ipynb
+│   ├── 98_prepare_drift_demo.ipynb
+│   ├── 99_demo_idempotency_drift_backfill.ipynb
+│   └── 99_phase2_submission_evidence.ipynb
 ├── src/carewatch/
 ├── scripts/refresh_readme_models.py
-├── tests/test_step6_silver_contracts.py
 ├── initial_ingestion_samples/
 │   └── initial_fetch_for_samples.py
 ├── .gitignore
@@ -625,7 +626,7 @@ See [Phase 2 guidelines](docs/phase2_guidelines.md) for the implementation seque
 
 ### Running Raw-to-Bronze
 
-Run `00_setup_tables.py` and `01_acquire_cms.ipynb` before `02_raw_to_bronze.py`. Raw-to-Bronze reads only successful records from `source_file_manifest`; it never scans the landing Volume for unregistered files.
+Run `00_setup_tables.ipynb` and `01_acquire_cms.ipynb` before `02_raw_to_bronze.ipynb`. Raw-to-Bronze reads only successful records from `source_file_manifest`; it never scans the landing Volume for unregistered files.
 
 The Raw-to-Bronze notebook accepts:
 
@@ -640,9 +641,9 @@ Each file or API page receives an independent execution-log row. Compatible adde
 
 ### Running Bronze-to-Silver
 
-Before the first Step 7 run, `silver_quarantine` must have the current eight-column schema. If setup reports `LEGACY_SCHEMA_ACCEPTED_NO_MIGRATION`, run `04_migrate_silver_quarantine.py` in its default `preview` mode. Preview is read-only. Preparing a candidate table and activating it are separate, approval-gated operations; activation retains the old table as `silver_quarantine_legacy_backup`.
+Before the first Step 7 run, `silver_quarantine` must have the current eight-column schema. If setup reports `LEGACY_SCHEMA_ACCEPTED_NO_MIGRATION`, run `04_migrate_silver_quarantine.ipynb` in its default `preview` mode. Preview is read-only. Preparing a candidate table and activating it are separate, approval-gated operations; activation retains the old table as `silver_quarantine_legacy_backup`.
 
-`03_bronze_to_silver.py` accepts:
+`03_bronze_to_silver.ipynb` accepts:
 
 - `dataset` and `load_type`, each defaulting to `all`;
 - optional `acquisition_run_id` and comma-separated `batch_ids`;
@@ -666,24 +667,24 @@ The source values for some CMS descriptive domains, especially deficiency correc
 
 ## Execution guide: incremental load and backfill
 
-Run these notebooks from a Databricks Git folder containing this repository. Use the same `catalog` and `schema` widgets for every step (defaults: `carewatch` and `pipeline`). Configure `address_secret_scope` and `address_secret_key` for `03_bronze_to_silver.py`; they name a Databricks Secret containing a stable private address-hash salt. Do not enter the salt itself into a widget or Git.
+Run these notebooks from a Databricks Git folder containing this repository. Use the same `catalog` and `schema` widgets for every step (defaults: `carewatch` and `pipeline`). Configure `address_secret_scope` and `address_secret_key` for `03_bronze_to_silver.ipynb`; they name a Databricks Secret containing a stable private address-hash salt. Do not enter the salt itself into a widget or Git.
 
 **Initial full load:**
 
-1. Run `notebooks/00_setup_tables.py` once to create or verify the namespace, Volume, control tables, quarantine tables, and Silver tables.
+1. Run `notebooks/00_setup_tables.ipynb` once to create or verify the namespace, Volume, control tables, quarantine tables, and Silver tables.
 2. Run `notebooks/01_acquire_cms.ipynb` with `load_type=full` (the default). It downloads all four current CMS bulk distributions into the landing Volume and registers them in `source_file_manifest`.
-3. Run `notebooks/02_raw_to_bronze.py` with `dataset=all`, `load_type=full`, and empty `acquisition_run_id` and `source_path`.
-4. Run `notebooks/03_bronze_to_silver.py` with `dataset=all`, `load_type=full`, empty scope filters, and the two secret-name widgets set. Leave `allow_soft_deletes=false`.
+3. Run `notebooks/02_raw_to_bronze.ipynb` with `dataset=all`, `load_type=full`, and empty `acquisition_run_id` and `source_path`.
+4. Run `notebooks/03_bronze_to_silver.ipynb` with `dataset=all`, `load_type=full`, empty scope filters, and the two secret-name widgets set. Leave `allow_soft_deletes=false`.
 
-**Standard incremental load:** run `01_acquire_cms.ipynb` with `load_type=incremental`, then `02_raw_to_bronze.py` with `dataset=all` and `load_type=incremental`, then `03_bronze_to_silver.py` with `dataset=all` and `load_type=incremental` plus the secret-name widgets. Leave all backfill filters empty and `reprocess=false`. Health Deficiencies and Penalties use the last fully committed Bronze watermark minus `overlap_days` (default 60) through the current UTC date. Provider and MDS use newly published CMS snapshots. Complete the full load through Bronze first; the API incremental path intentionally fails if its Bronze watermark is missing.
+**Standard incremental load:** run `01_acquire_cms.ipynb` with `load_type=incremental`, then `02_raw_to_bronze.ipynb` with `dataset=all` and `load_type=incremental`, then `03_bronze_to_silver.ipynb` with `dataset=all` and `load_type=incremental` plus the secret-name widgets. Leave all backfill filters empty and `reprocess=false`. Health Deficiencies and Penalties use the last fully committed Bronze watermark minus `overlap_days` (default 60) through the current UTC date. Provider and MDS use newly published CMS snapshots. Complete the full load through Bronze first; the API incremental path intentionally fails if its Bronze watermark is missing.
 
-**Backfill or rerun an already registered past batch:** find its `batch_id` and `acquisition_run_id` in `carewatch.pipeline.source_file_manifest` or `pipeline_execution_logs`. To replay Raw-to-Bronze, set `dataset=<dataset>`, `acquisition_run_id=<historical run ID>`, and `reprocess=true` in `02_raw_to_bronze.py`; optionally set `source_path` to one exact manifest-listed file. Then run `03_bronze_to_silver.py` with `dataset=<dataset>`, `batch_ids=<historical batch ID>` (comma-separated for several), `reprocess=true`, and the secret-name widgets. Leave `allow_soft_deletes=false`. For a Silver-only replay, skip the Raw step and run `03` directly on the existing Bronze batch. The alternative `ingest_from=YYYY-MM-DD` and `ingest_to=YYYY-MM-DD` widgets select a complete Bronze ingestion-date window; a partial batch selection is rejected. No code edits or new CMS download are needed for a registered batch. `01_acquire_cms.ipynb` does not currently expose an arbitrary historical CMS API date window, so this guide does not claim to acquire one.
+**Backfill or rerun an already registered past batch:** find its `batch_id` and `acquisition_run_id` in `carewatch.pipeline.source_file_manifest` or `pipeline_execution_logs`. To replay Raw-to-Bronze, set `dataset=<dataset>`, `acquisition_run_id=<historical run ID>`, and `reprocess=true` in `02_raw_to_bronze.ipynb`; optionally set `source_path` to one exact manifest-listed file. Then run `03_bronze_to_silver.ipynb` with `dataset=<dataset>`, `batch_ids=<historical batch ID>` (comma-separated for several), `reprocess=true`, and the secret-name widgets. Leave `allow_soft_deletes=false`. For a Silver-only replay, skip the Raw step and run `03` directly on the existing Bronze batch. The alternative `ingest_from=YYYY-MM-DD` and `ingest_to=YYYY-MM-DD` widgets select a complete Bronze ingestion-date window; a partial batch selection is rejected. No code edits or new CMS download are needed for a registered batch. `01_acquire_cms.ipynb` does not currently expose an arbitrary historical CMS API date window, so this guide does not claim to acquire one.
 
-After a run, inspect `carewatch.pipeline.pipeline_execution_logs` for `Raw-to-Bronze` and `Bronze-to-Silver` rows with the selected parameter, start/end times, status, and inserted/updated counts. Rerun the same Silver batch with `reprocess=true` and verify `rows_inserted=0`, `rows_updated=0`, unchanged Silver row count, and unchanged `load_timestamp` for matching keys. `notebooks/99_demo_idempotency_drift_backfill.py` displays scoped manifest, count, drift, quarantine, and log views; set its `dataset` and optional `acquisition_run_id`/`batch_id` widgets to the run being demonstrated.
+After a run, inspect `carewatch.pipeline.pipeline_execution_logs` for `Raw-to-Bronze` and `Bronze-to-Silver` rows with the selected parameter, start/end times, status, and inserted/updated counts. Rerun the same Silver batch with `reprocess=true` and verify `rows_inserted=0`, `rows_updated=0`, unchanged Silver row count, and unchanged `load_timestamp` for matching keys. `notebooks/99_demo_idempotency_drift_backfill.ipynb` displays scoped manifest, count, drift, quarantine, and log views; set its `dataset` and optional `acquisition_run_id`/`batch_id` widgets to the run being demonstrated.
 
 ## Submission evidence
 
-The rubric requires **working-run proof** in addition to code and this README. Save notebook outputs in the repository or submit a roughly five-minute screen recording showing the Databricks workspace, explicit schemas, a first Silver MERGE and a repeat with no duplicate rows, a historical batch backfill, an added-column or incompatible-value drift run with its quarantine/drift result, and `pipeline_execution_logs`. Follow the [step-by-step recording walkthrough](docs/phase2_evidence_walkthrough.md); `notebooks/98_prepare_drift_demo.py` registers a controlled synthetic drift fixture in a separate schema. [The read-only Databricks validation snapshot](docs/evidence/databricks_validation_2026-10-11.md) records live table, key, timestamp, quarantine, and execution-log queries. It is supporting evidence, but it does not replace saved notebook outputs or the requested recording. A live schema-drift demonstration remains outstanding.
+The rubric requires **working-run proof** in addition to code and this README. Use the [saved notebook output checklist](docs/phase2_evidence_walkthrough.md): run the isolated drift fixture with `notebooks/98_prepare_drift_demo.ipynb`, then run `notebooks/99_phase2_submission_evidence.ipynb` and export the completed notebooks with outputs under `docs/evidence/`. The evidence notebook checks physical schemas, `load_timestamp`, Silver key uniqueness, the first MERGE and no-op historical rerun, drift/quarantine handling, and full/incremental execution logs. The live schema-drift run and output exports must be completed before submission.
 
 ## Data quality and security
 
@@ -698,7 +699,7 @@ The rubric requires **working-run proof** in addition to code and this README. S
 
 ## Verification status
 
-The four-dataset acquisition, Raw-to-Bronze, and Bronze-to-Silver paths are implemented in code. Local schema-contract tests pass. Read-only Databricks SQL checks confirm populated Bronze/Silver tables, unique Silver entity keys, non-null `load_timestamp` values in current rows, full and incremental logs, a no-op reprocess, and 36 Silver quarantined rows. The drift log currently has zero rows; capture a controlled live drift run and save the rubric's notebook outputs or recording before submission. Gold tables and Power BI dashboards are outside the Phase 2 submission scope.
+The four-dataset acquisition, Raw-to-Bronze, and Bronze-to-Silver paths are implemented in code. Read-only Databricks SQL checks confirm populated Bronze/Silver tables, unique Silver entity keys, non-null `load_timestamp` values in current rows, full and incremental logs, a no-op reprocess, and 36 Silver quarantined rows. The production drift log currently has zero rows; run the controlled demonstration in the separate `phase2_demo` schema and save its notebook outputs before submission. Gold tables and Power BI dashboards are outside the Phase 2 submission scope.
 
 
 

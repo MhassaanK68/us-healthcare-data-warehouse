@@ -1,140 +1,27 @@
-# Phase 2 submission recording walkthrough
+# Phase 2 submission: save real notebook outputs
 
-Use a Databricks Git folder synced to this repository's latest `main`. Record one roughly five-minute screen video, or save executed notebook outputs and screenshots in `docs/evidence/` and push them. The steps below use the current `carewatch.pipeline` run history for the repeat/backfill and a separate `carewatch.phase2_demo` namespace for synthetic drift data. Do not enter the address-hash salt itself in any widget or recording; enter only the Databricks secret scope and key names already used for the working Silver runs.
+Use the rubric's **saved notebook outputs** option. The repository already contains the runnable PySpark notebooks and README models. The remaining proof is a completed drift run plus exported notebooks whose output cells are present in GitHub. Do not create a video.
 
-## 1. Show the implementation and schemas
+## 1. Sync Databricks to the latest GitHub `main`
 
-In Databricks, open `src/carewatch/schemas.py` and show the explicit `StructType` definitions. Open `src/carewatch/bronze.py` and show `.schema(schema)` before `.load(...)`. Open `src/carewatch/silver.py` at `merge_silver_batch` and show the Delta `MERGE` with matched updates and unmatched inserts. Briefly show the README Bronze/Silver model section.
+Open the Databricks Git folder for this repository and pull the latest `main` so `notebooks/99_phase2_submission_evidence.ipynb` is available. Run notebooks in that Git folder. If a widget bar is missing, run the cell containing `dbutils.widgets` once, set the widgets, then run the whole notebook.
 
-In separate Databricks SQL cells, run:
+## 2. Run the isolated schema-change demonstration
 
-```sql
-DESCRIBE TABLE carewatch.pipeline.bronze_nh_provider_info;
-```
+Use `catalog=carewatch`, `schema=phase2_demo`, and `volume=landing` in `00_setup_tables.ipynb`. Then run `98_prepare_drift_demo.ipynb` with the same values. Copy its printed **acquisition_run_id** and **batch_id**. This fixture has two synthetic Provider Information rows, an added column, and one invalid rating. It uses a separate schema from production.
 
-```sql
-DESCRIBE TABLE carewatch.pipeline.silver_facility;
-```
+Run `02_raw_to_bronze.ipynb` with `dataset=provider_info`, `load_type=full`, `acquisition_run_id=<ID from 98>`, `reprocess=false`, `catalog=carewatch`, `schema=phase2_demo`, and blank `source_path`.
 
-Show `load_timestamp` and the typed Silver columns.
+Run `03_bronze_to_silver.ipynb` with `dataset=provider_info`, `load_type=full`, `batch_ids=<batch ID from 98>`, `reprocess=false`, `allow_soft_deletes=false`, `catalog=carewatch`, and `schema=phase2_demo`. Leave the other scope/date widgets blank. Set `address_secret_scope` and `address_secret_key` to the **names** already used for the production Silver run; never expose the secret value.
 
-## 2. Show a historical batch replay and no-op MERGE
+## 3. Run the single evidence notebook
 
-Use the existing historical Provider Information full batch:
+Run `99_phase2_submission_evidence.ipynb` with `catalog=carewatch`, `schema=pipeline`, `historical_batch_id=14c281a6e8c6c099c0dbad46`, `demo_schema=phase2_demo`, and `demo_batch_id=<batch ID from 98>`. Its final output must say **All Phase 2 evidence checks passed.** It displays actual table schemas, all Bronze/Silver timestamp and key checks, the first MERGE and no-op historical rerun, the drift/quarantine result, and full/incremental logs. If an assertion fails, resolve the issue and rerun before exporting.
 
-- `acquisition_run_id`: `d7252e0e-7df8-463d-b377-f6fd7f6c5221`
-- `batch_id`: `14c281a6e8c6c099c0dbad46`
+## 4. Export with outputs and put the files in GitHub
 
-First record the Silver state:
+For each completed notebook `98_prepare_drift_demo.ipynb`, `02_raw_to_bronze.ipynb`, `03_bronze_to_silver.ipynb`, and `99_phase2_submission_evidence.ipynb`, choose **File → Export → IPython Notebook → Include outputs → Export** in Databricks. Create `docs/evidence/` if it is absent, then save the downloaded files there. Name the demo pipeline exports `phase2_demo_02_raw_to_bronze.ipynb` and `phase2_demo_03_bronze_to_silver.ipynb` so they cannot overwrite the source notebooks.
 
-```sql
-SELECT count(*) AS rows, count(DISTINCT facility_key) AS distinct_keys,
-       count_if(load_timestamp IS NULL) AS null_load_timestamps
-FROM carewatch.pipeline.silver_facility;
-```
+Open each downloaded `.ipynb` and confirm its code cells contain nonempty `outputs`; the source notebooks in `notebooks/` have mostly empty output arrays. Commit and push the four evidence files. Open the GitHub copies and check that the result tables and final **PASS** lines are visible. Submit the [GitHub repository link](https://github.com/MhassaanK68/us-healthcare-data-warehouse).
 
-Expected from the 2026-10-11 validation snapshot: 14,690 rows, 14,690 distinct keys, and 0 null timestamps. A newer CMS run may legitimately change the count; the key check and the before/after equality matter.
-
-Run `notebooks/02_raw_to_bronze.py` with these widgets:
-
-- `dataset=provider_info`
-- `load_type=full`
-- `acquisition_run_id=d7252e0e-7df8-463d-b377-f6fd7f6c5221`
-- `source_path=` empty
-- `reprocess=true`
-- `catalog=carewatch`, `schema=pipeline`
-
-This replays the registered older file; it does not download CMS data. Its result should show the historical batch and a successful Raw-to-Bronze log.
-
-Run `notebooks/03_bronze_to_silver.py` with:
-
-- `dataset=provider_info`, `load_type=full`
-- `batch_ids=14c281a6e8c6c099c0dbad46`
-- `acquisition_run_id=` empty, `ingest_from=` empty, `ingest_to=` empty
-- `reprocess=true`, `allow_soft_deletes=false`
-- `address_secret_scope` and `address_secret_key`: the existing secret **names**, not the salt value
-- `catalog=carewatch`, `schema=pipeline`
-
-Run the Silver count query again. Show that the row count and distinct-key count did not change. Then run:
-
-```sql
-SELECT pipeline_layer, dataset, load_type, parameter_processed,
-       start_time, end_time, status, rows_read, rows_inserted, rows_updated
-FROM carewatch.pipeline.pipeline_execution_logs
-WHERE batch_id = '14c281a6e8c6c099c0dbad46'
-ORDER BY start_time DESC
-LIMIT 6;
-```
-
-Point to the new `Bronze-to-Silver` row with `rows_inserted=0` and `rows_updated=0`. This is both a parameterized historical batch replay and an idempotent MERGE rerun. If a newer current snapshot changed the provider row hashes, the old backfill still must not overwrite newer rows; inspect the log and count instead of assuming exact numbers.
-
-## 3. Create and run the isolated schema-drift fixture
-
-Run `notebooks/00_setup_tables.py` with `catalog=carewatch`, `schema=phase2_demo`, and `volume=landing`. This creates separate demo control and Silver tables. Do not use `schema=pipeline` for this fixture.
-
-Run `notebooks/98_prepare_drift_demo.py` with the same three widgets. It creates a two-row synthetic Provider Information CSV inside `/Volumes/carewatch/phase2_demo/landing` and registers its exact hash and path in the demo manifest. One row has a valid rating, one has a non-numeric rating, and the file has an extra source column. **Copy the printed `acquisition_run_id` and `batch_id`** for the next steps. This is a test fixture, not a CMS full acquisition.
-
-Run `notebooks/02_raw_to_bronze.py` with:
-
-- `dataset=provider_info`, `load_type=full`
-- `acquisition_run_id=<the new printed acquisition_run_id>`
-- `source_path=` empty, `reprocess=false`
-- `catalog=carewatch`, `schema=phase2_demo`
-
-The file result should show 2 Bronze rows and `phase2_demo_added_column` in `added_columns`. Run these SQL queries, replacing the placeholder with the printed batch ID:
-
-```sql
-SELECT drift_type, column_name, detail
-FROM carewatch.phase2_demo.schema_drift_log
-WHERE batch_id = '<new batch_id>';
-
-SELECT count(*) AS bronze_rows,
-       count_if(phase2_demo_added_column IS NOT NULL) AS rows_with_new_column
-FROM carewatch.phase2_demo.bronze_nh_provider_info
-WHERE _batch_id = '<new batch_id>';
-```
-
-Expect one `ADDED_COLUMN` drift log entry and 2 Bronze rows with the added column.
-
-Run `notebooks/03_bronze_to_silver.py` with:
-
-- `dataset=provider_info`, `load_type=full`
-- `batch_ids=<the new printed batch_id>`
-- `acquisition_run_id=` empty, `ingest_from=` empty, `ingest_to=` empty
-- `reprocess=false`, `allow_soft_deletes=false`
-- the same `address_secret_scope` and `address_secret_key` names
-- `catalog=carewatch`, `schema=phase2_demo`
-
-Then run:
-
-```sql
-SELECT count(*) AS accepted_rows
-FROM carewatch.phase2_demo.silver_facility
-WHERE source_batch_id = '<new batch_id>';
-
-SELECT concat_ws(', ', failed_rules) AS failed_rules, count(*) AS rejected_rows
-FROM carewatch.phase2_demo.silver_quarantine
-WHERE source_batch_id = '<new batch_id>'
-GROUP BY concat_ws(', ', failed_rules);
-
-SELECT pipeline_layer, status, rows_read, rows_inserted,
-       rows_updated, rows_quarantined
-FROM carewatch.phase2_demo.pipeline_execution_logs
-WHERE batch_id = '<new batch_id>'
-ORDER BY start_time;
-```
-
-Expect 1 accepted Silver row, 1 quarantined row with a `SAFE_CAST` rating failure, and successful or partially quarantined per-layer logs. This demonstrates that an added column reaches Bronze while a bad typed value is quarantined and a valid row continues to Silver.
-
-## 4. Show the run history and submit
-
-Finish with:
-
-```sql
-SELECT pipeline_layer, load_type, status, count(*) AS runs
-FROM carewatch.pipeline.pipeline_execution_logs
-GROUP BY pipeline_layer, load_type, status
-ORDER BY pipeline_layer, load_type, status;
-```
-
-Show full and incremental records for `CMS-to-Landing`, `Raw-to-Bronze`, and `Bronze-to-Silver`. If you save notebook outputs instead of a video, export or screenshot each result above and commit it under `docs/evidence/`. Confirm the GitHub repository link opens in a private browser window, and submit `https://github.com/MhassaanK68/us-healthcare-data-warehouse` plus the recording if using video proof.
+Databricks documents the [export flow and Include outputs option](https://docs.databricks.com/aws/en/notebooks/notebook-export-import). If the Git folder refuses to commit outputs directly, exporting the four IPython notebooks with outputs to `docs/evidence/` avoids relying on that workspace setting.
