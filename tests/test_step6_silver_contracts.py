@@ -376,12 +376,18 @@ class SilverSchemaContractTests(unittest.TestCase):
         self.assertTrue(_field_map(audit.SILVER_QUARANTINE_SCHEMA)["candidate_entity_key"].nullable)
         self.assertFalse(_field_map(audit.SILVER_QUARANTINE_SCHEMA)["source_batch_id"].nullable)
 
-    def test_step7_files_remain_empty(self):
-        self.assertEqual((ROOT / "src" / "carewatch" / "silver.py").stat().st_size, 0)
-        self.assertEqual(
-            (ROOT / "notebooks" / "03_bronze_to_silver.py").stat().st_size,
-            0,
+    def test_step7_implementation_is_present(self):
+        silver_source = (ROOT / "src" / "carewatch" / "silver.py").read_text(
+            encoding="utf-8"
         )
+        notebook_source = (ROOT / "notebooks" / "03_bronze_to_silver.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("def merge_silver_batch(", silver_source)
+        self.assertIn(".whenMatchedUpdate(", silver_source)
+        self.assertIn(".whenNotMatchedInsert(", silver_source)
+        self.assertIn("dbutils.widgets.text(\"batch_ids\"", notebook_source)
+        self.assertIn("dbutils.widgets.text(\"ingest_from\"", notebook_source)
 
 
 if __name__ == "__main__":

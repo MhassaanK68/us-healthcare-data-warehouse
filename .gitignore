@@ -1,5 +1,6 @@
 data/raw/
 *.parquet
 .env
+.codex/
 __pycache__/
 *.py[cod]

@@ -402,7 +402,11 @@ def select_silver_work_items(
     batch_ids: Sequence[str] = (),
     reprocess: bool = False,
 ) -> tuple[SilverWorkItem, ...]:
-    """Select successful Bronze batches using log state as the Silver checkpoint."""
+    """Select Bronze batches with accepted rows using log state as the checkpoint.
+
+    A partially quarantined Bronze file can still contain valid rows for
+    Silver. It does not advance the source acquisition watermark.
+    """
 
     if not spark.catalog.tableExists(manifest_table):
         raise SilverProcessingError(f"Manifest table does not exist: {manifest_table}")
@@ -442,14 +446,15 @@ def select_silver_work_items(
         .join(run_counts, ["dataset", "acquisition_run_id"], "left")
     )
 
-    bronze_success = (
+    bronze_ready = (
         spark.table(log_table)
         .filter(F.col("pipeline_layer") == F.lit("Raw-to-Bronze"))
-        .filter(F.col("status") == F.lit("SUCCESS"))
+        .filter(F.col("status").isin("SUCCESS", "QUARANTINED_PARTIAL"))
+        .filter(F.col("rows_inserted") > F.lit(0))
         .select("dataset", "batch_id")
         .distinct()
     )
-    candidates = candidates.join(bronze_success, ["dataset", "batch_id"], "inner")
+    candidates = candidates.join(bronze_ready, ["dataset", "batch_id"], "inner")
 
     if not reprocess:
         silver_complete = (
