@@ -56,4 +56,4 @@ The first full deficiency merge logged 418,911 accepted rows and 36 quarantined 
 - Save executed Databricks notebook outputs in the repo, or provide the requested short screen recording. The existing acquisition notebook has no saved outputs.
 - Run a controlled schema-drift example through Raw-to-Bronze and capture `schema_drift_log`, quarantine or evolved Bronze schema, and a successful good-file batch.
 - Capture a backfill run with the widget values visible. The logged `reprocess=true` batch proves the historical batch can be reprocessed but does not show the full parameterized workflow on screen.
-- Push the reviewed project to the intended GitHub repository and verify that its link opens for the grader.
+- The reviewed project was pushed to `https://github.com/MhassaanK68/us-healthcare-data-warehouse`; an unauthenticated HTTP request to the repository page returned `200`.

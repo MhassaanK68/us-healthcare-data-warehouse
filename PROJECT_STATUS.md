@@ -26,4 +26,4 @@ The read-only queries recorded in `docs/evidence/databricks_validation_2026-10-1
 
 The attached rubric also requires saved executed notebook outputs or a short screen recording. The SQL validation report is supporting evidence, but neither those outputs nor a recording is in the repository. Run and capture a controlled drift case, the widget-driven backfill, and the remaining on-screen rubric demonstration.
 
-The intended repository is `https://github.com/MhassaanK68/us-healthcare-data-warehouse`. The local `origin` points there, and a remote HEAD check matched the local baseline before this review. Verify that the instructor can open the final submitted link.
+The reviewed project was pushed to `https://github.com/MhassaanK68/us-healthcare-data-warehouse`. The remote HEAD matched the pushed commit, and an unauthenticated HTTP request to the repository page returned `200`.
