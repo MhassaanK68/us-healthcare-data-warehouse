@@ -9,6 +9,7 @@ Updated: 2026-10-11 (Asia/Karachi)
 - Four typed Silver schemas, validation and Silver quarantine, deterministic keys and hashes, and hash-aware Delta `MERGE`.
 - Parameterized batch and ingestion-date replay in the Raw-to-Bronze and Bronze-to-Silver notebooks.
 - Per-layer execution logging and a read-only evidence notebook.
+- An isolated synthetic drift-fixture notebook and an exact recording walkthrough.
 - README column-level Bronze and Silver models and a concrete incremental/backfill run guide.
 
 ## Locally verified
@@ -24,6 +25,6 @@ The read-only queries recorded in `docs/evidence/databricks_validation_2026-10-1
 
 ## Required before submission
 
-The attached rubric also requires saved executed notebook outputs or a short screen recording. The SQL validation report is supporting evidence, but neither those outputs nor a recording is in the repository. Run and capture a controlled drift case, the widget-driven backfill, and the remaining on-screen rubric demonstration.
+The attached rubric also requires saved executed notebook outputs or a short screen recording. The SQL validation report is supporting evidence, but neither those outputs nor a recording is in the repository. Follow `docs/phase2_evidence_walkthrough.md` to capture the controlled drift case, widget-driven backfill, and remaining on-screen demonstration.
 
 The reviewed project was pushed to `https://github.com/MhassaanK68/us-healthcare-data-warehouse`. The remote HEAD matched the pushed commit, and an unauthenticated HTTP request to the repository page returned `200`.
