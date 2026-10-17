@@ -378,13 +378,15 @@ def ensure_delta_table(spark: Any, table_name: str, schema: StructType) -> str:
             )
         return "VERIFIED"
 
-    # Databricks Free/serverless does not support the ``errorifexists`` writer
-    # mode. An empty typed append creates a missing managed table without
-    # inserting rows; a concurrent creator is still protected by Delta's
-    # schema checks.
-    spark.createDataFrame([], schema=schema).write.format("delta").mode(
-        "append"
-    ).saveAsTable(table_name)
+    # Empty DataFrame writes can lose StructField.nullable=False in Unity
+    # Catalog. Declare the constraints in Delta DDL so a fresh namespace
+    # satisfies the same contract required by the Silver pipeline.
+    columns = ", ".join(
+        f"`{field.name}` {field.dataType.simpleString()}"
+        f"{' NOT NULL' if not field.nullable else ''}"
+        for field in schema.fields
+    )
+    spark.sql(f"CREATE TABLE {table_name} ({columns}) USING DELTA")
     return "CREATED"
 
 
