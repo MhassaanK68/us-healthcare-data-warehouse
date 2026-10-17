@@ -533,7 +533,9 @@ us-healthcare-warehouse/
 ├── docs/
 │   ├── data_analysis_project_proposal.md
 │   ├── phase2_guidelines.md
-│   └── bronze_silver_schema_contract.md
+│   ├── bronze_silver_schema_contract.md
+│   ├── phase2_evidence_walkthrough.md
+│   └── evidence/phase2_live_outputs.ipynb
 ├── notebooks/
 │   ├── 00_setup_tables.ipynb
 │   ├── 01_acquire_cms.ipynb
@@ -542,7 +544,8 @@ us-healthcare-warehouse/
 │   ├── 04_migrate_silver_quarantine.ipynb
 │   ├── 98_prepare_drift_demo.ipynb
 │   ├── 99_demo_idempotency_drift_backfill.ipynb
-│   └── 99_phase2_submission_evidence.ipynb
+│   ├── 99_phase2_submission_evidence.ipynb
+│   └── 99_export_phase2_evidence.ipynb
 ├── src/carewatch/
 ├── scripts/refresh_readme_models.py
 ├── initial_ingestion_samples/
@@ -684,7 +687,7 @@ After a run, inspect `carewatch.pipeline.pipeline_execution_logs` for `Raw-to-Br
 
 ## Submission evidence
 
-The rubric requires **working-run proof** in addition to code and this README. Use the [saved notebook output checklist](docs/phase2_evidence_walkthrough.md): run the isolated drift fixture with `notebooks/98_prepare_drift_demo.ipynb`, then run `notebooks/99_phase2_submission_evidence.ipynb` and export the completed notebooks with outputs under `docs/evidence/`. The evidence notebook checks physical schemas, `load_timestamp`, Silver key uniqueness, the first MERGE and no-op historical rerun, drift/quarantine handling, and full/incremental execution logs. The live schema-drift run and output exports must be completed before submission.
+The rubric's saved-output proof is [phase2_live_outputs.ipynb](docs/evidence/phase2_live_outputs.ipynb). It contains actual Spark SQL results captured by [99_export_phase2_evidence.ipynb](notebooks/99_export_phase2_evidence.ipynb) in Databricks, with a final passing assertion. It covers physical schemas, `load_timestamp`, Silver key uniqueness, the first MERGE and no-op historical rerun, the isolated drift/quarantine run, and full/incremental execution logs. See the [evidence guide](docs/phase2_evidence_walkthrough.md) for job identifiers and reproduction steps.
 
 ## Data quality and security
 
@@ -699,7 +702,7 @@ The rubric requires **working-run proof** in addition to code and this README. U
 
 ## Verification status
 
-The four-dataset acquisition, Raw-to-Bronze, and Bronze-to-Silver paths are implemented in code. Read-only Databricks SQL checks confirm populated Bronze/Silver tables, unique Silver entity keys, non-null `load_timestamp` values in current rows, full and incremental logs, a no-op reprocess, and 36 Silver quarantined rows. The production drift log currently has zero rows; run the controlled demonstration in the separate `phase2_demo` schema and save its notebook outputs before submission. Gold tables and Power BI dashboards are outside the Phase 2 submission scope.
+The four-dataset acquisition, Raw-to-Bronze, and Bronze-to-Silver paths are implemented in code. The saved Databricks outputs confirm populated Bronze/Silver tables, unique Silver entity keys, non-null `load_timestamp`, full and incremental logs, a no-op reprocess, and the controlled drift run in `phase2_demo` with one accepted and one quarantined Silver row. Gold tables and Power BI dashboards are outside the Phase 2 submission scope.
 
 
 

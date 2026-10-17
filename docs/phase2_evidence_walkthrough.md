@@ -1,27 +1,27 @@
-# Phase 2 submission: save real notebook outputs
+# Phase 2 submission evidence
 
-Use the rubric's **saved notebook outputs** option. The repository already contains the runnable PySpark notebooks and README models. The remaining proof is a completed drift run plus exported notebooks whose output cells are present in GitHub. Do not create a video.
+Submit the [GitHub repository](https://github.com/MhassaanK68/us-healthcare-data-warehouse). Use the rubric's **saved notebook outputs** option; no video is needed.
 
-## 1. Sync Databricks to the latest GitHub `main`
+## Open the saved outputs
 
-Open the Databricks Git folder for this repository and pull the latest `main` so `notebooks/99_phase2_submission_evidence.ipynb` is available. Run notebooks in that Git folder. If a widget bar is missing, run the cell containing `dbutils.widgets` once, set the widgets, then run the whole notebook.
+Open [phase2_live_outputs.ipynb](evidence/phase2_live_outputs.ipynb) in GitHub. The output cells were generated from live Spark SQL queries by [99_export_phase2_evidence.ipynb](../notebooks/99_export_phase2_evidence.ipynb) running in Databricks on 17 October 2026. They show:
 
-## 2. Run the isolated schema-change demonstration
+1. Bronze and Silver physical schemas.
+2. Populated rows and zero missing `load_timestamp` values in all four Bronze and four Silver tables; Silver distinct-key counts equal row counts.
+3. A Provider Silver initial MERGE and a no-change rerun with zero inserts and updates.
+4. An isolated added-column drift event, two Bronze rows, one accepted Silver row, and one Safe Cast quarantine row.
+5. Successful full and incremental execution logs for both transformation layers.
 
-Use `catalog=carewatch`, `schema=phase2_demo`, and `volume=landing` in `00_setup_tables.ipynb`. Then run `98_prepare_drift_demo.ipynb` with the same values. Copy its printed **acquisition_run_id** and **batch_id**. This fixture has two synthetic Provider Information rows, an added column, and one invalid rating. It uses a separate schema from production.
+The final output cell states **All Phase 2 evidence checks passed.** The notebook says how its results were captured; it is a generated saved-output artifact, not a Databricks UI export of the pipeline notebooks.
 
-Run `02_raw_to_bronze.ipynb` with `dataset=provider_info`, `load_type=full`, `acquisition_run_id=<ID from 98>`, `reprocess=false`, `catalog=carewatch`, `schema=phase2_demo`, and blank `source_path`.
+## Reproduce the controlled drift proof
 
-Run `03_bronze_to_silver.ipynb` with `dataset=provider_info`, `load_type=full`, `batch_ids=<batch ID from 98>`, `reprocess=false`, `allow_soft_deletes=false`, `catalog=carewatch`, and `schema=phase2_demo`. Leave the other scope/date widgets blank. Set `address_secret_scope` and `address_secret_key` to the **names** already used for the production Silver run; never expose the secret value.
+The production data is in `carewatch.pipeline`. The demonstration uses `carewatch.phase2_demo`, so it cannot change production rows. In a fresh demo schema, run the notebooks in this order:
 
-## 3. Run the single evidence notebook
+1. `00_setup_tables.ipynb` with `catalog=carewatch`, `schema=phase2_demo`, `volume=landing`.
+2. `98_prepare_drift_demo.ipynb` with the same namespace. Note its `acquisition_run_id` and `batch_id`.
+3. `02_raw_to_bronze.ipynb` with `dataset=provider_info`, `load_type=full`, `acquisition_run_id=<fixture ID>`, `reprocess=false`, `catalog=carewatch`, `schema=phase2_demo`.
+4. `03_bronze_to_silver.ipynb` with `dataset=provider_info`, `load_type=full`, `batch_ids=<fixture batch>`, `reprocess=false`, `allow_soft_deletes=false`, the demo namespace, and the production address-hashing **scope and key names** (never the secret value).
+5. `99_export_phase2_evidence.ipynb` with `demo_batch_id=<fixture batch>`. It asserts the required outcomes and writes `/Volumes/carewatch/phase2_demo/landing/evidence/phase2_live_outputs.ipynb` for download into `docs/evidence/`.
 
-Run `99_phase2_submission_evidence.ipynb` with `catalog=carewatch`, `schema=pipeline`, `historical_batch_id=14c281a6e8c6c099c0dbad46`, `demo_schema=phase2_demo`, and `demo_batch_id=<batch ID from 98>`. Its final output must say **All Phase 2 evidence checks passed.** It displays actual table schemas, all Bronze/Silver timestamp and key checks, the first MERGE and no-op historical rerun, the drift/quarantine result, and full/incremental logs. If an assertion fails, resolve the issue and rerun before exporting.
-
-## 4. Export with outputs and put the files in GitHub
-
-For each completed notebook `98_prepare_drift_demo.ipynb`, `02_raw_to_bronze.ipynb`, `03_bronze_to_silver.ipynb`, and `99_phase2_submission_evidence.ipynb`, choose **File → Export → IPython Notebook → Include outputs → Export** in Databricks. Create `docs/evidence/` if it is absent, then save the downloaded files there. Name the demo pipeline exports `phase2_demo_02_raw_to_bronze.ipynb` and `phase2_demo_03_bronze_to_silver.ipynb` so they cannot overwrite the source notebooks.
-
-Put the four exported files in `docs/evidence/` and tell Codex; it can verify that each `.ipynb` has nonempty `outputs`, then commit and push them. Open the GitHub copies and check that the result tables and final **PASS** lines are visible. Submit the [GitHub repository link](https://github.com/MhassaanK68/us-healthcare-data-warehouse).
-
-Databricks documents the [export flow and Include outputs option](https://docs.databricks.com/aws/en/notebooks/notebook-export-import). If the Git folder refuses to commit outputs directly, exporting the four IPython notebooks with outputs to `docs/evidence/` avoids relying on that workspace setting.
+The submitted proof uses fixture batch `demo_fd48e31d03b649c9bb158b10`. Raw-to-Bronze job run `611519289944167`, Silver job run `192941495324672`, and evidence export job run `736918120403269` identify the Databricks executions. The historical MERGE batch is `14c281a6e8c6c099c0dbad46` in the production logs.
