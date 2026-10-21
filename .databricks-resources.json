@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "type": "job",
+      "name": "CareWatch Phase 2 evidence run",
+      "id": "773901515830796",
+      "created_at": "2026-10-11T12:53:22.134887+00:00",
+      "updated_at": "2026-10-11T12:53:22.134887+00:00"
+    },
+    {
+      "type": "job",
+      "name": "CareWatch Phase 2 Raw drift demo",
+      "id": "426246523681429",
+      "created_at": "2026-10-11T12:57:19.483592+00:00",
+      "updated_at": "2026-10-11T12:57:19.483592+00:00"
+    },
+    {
+      "type": "job",
+      "name": "CareWatch Phase 2 secret name lookup",
+      "id": "1061492167812692",
+      "created_at": "2026-10-11T13:06:19.132975+00:00",
+      "updated_at": "2026-10-11T13:06:19.132975+00:00"
+    },
+    {
+      "type": "job",
+      "name": "CareWatch Phase 2 Silver drift demo",
+      "id": "968706141518657",
+      "created_at": "2026-10-11T13:07:26.688359+00:00",
+      "updated_at": "2026-10-11T13:07:26.688359+00:00"
+    }
+  ]
+}
