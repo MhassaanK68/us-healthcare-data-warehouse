@@ -123,7 +123,7 @@ Run it a second time without changing Silver. All `rows_inserted`, `rows_updated
 
 ## 7. Deploy the four-task Databricks Job
 
-Deploy the versioned settings in `deployment/carewatch_daily_incremental.job.json` after the audit migration and Gold setup. The Job uses the Git repository's `main` branch and snapshots one commit for all tasks at run start. Its schedule is daily at 03:00 UTC with one concurrent run. Verify that the Job's Git reference points to the commit containing this implementation before enabling its schedule.
+Deploy the versioned settings in `deployment/carewatch_daily_incremental.job.json` after the audit migration and Gold setup. The Job uses the Git repository's `codex/fix-phase3-review` branch and snapshots one commit for all tasks at run start. Its schedule is daily at 03:00 UTC with one concurrent run. After merging this branch into `main`, change the Job Git reference and this definition to `main` together. Verify that the Job's Git reference points to the commit containing this implementation before enabling its schedule.
 
 The definition enforces these success dependencies:
 
