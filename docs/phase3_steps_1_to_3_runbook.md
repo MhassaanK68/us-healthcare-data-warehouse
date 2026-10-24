@@ -6,7 +6,7 @@ This runbook covers the work assigned to you:
 2. Implement and prove the Gold transformations.
 3. Attach Gold to the existing pipeline and audit trail.
 
-The code is complete, but the screenshots and result values must come from your own Databricks workspace. Do not invent them.
+The code is complete. Observed run IDs, audit values, and reconciliation counts from this Databricks workspace are saved in [`docs/evidence/phase3/deployment_validation_2026-10-24.md`](evidence/phase3/deployment_validation_2026-10-24.md). Capture screenshots of those runs in your own workspace for the final report.
 
 ## 1. Files in this package
 
@@ -18,9 +18,7 @@ The code is complete, but the screenshots and result values must come from your 
 | `notebooks/04_silver_to_gold.ipynb` | Thin Databricks orchestration. It receives widgets, opens one audit context, calls the reusable Gold refresh, and displays real Delta metrics/counts. |
 | `deployment/carewatch_daily_incremental.job.json` | Versioned four-task Git-backed Job, daily UTC schedule, parameters, success dependencies, and secret **names**. |
 | `docs/gold_data_dictionary.md` | The locked dimensional contract: grains, columns, PK/FK relationships, ER diagram, nullability, derivations, and BI meanings. |
-| `docs/evidence/phase3/README.md` | Checklist and location for real Phase 3 screenshots/query outputs. |
-| `docs/reports/README.md` | Location and contents expected for the later final PDF. |
-| `bi/README.md` | Location and safety note for the later Power BI file. |
+| `docs/evidence/phase3/deployment_validation_2026-10-24.md` | Observed Job runs, audit metrics, production fact reconciliation, and isolated empty/deletion regression evidence. |
 
 ### Changed files
 
