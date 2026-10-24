@@ -21,7 +21,12 @@ from pyspark.sql.types import (
 
 MAX_ERROR_LENGTH = 2000
 _SUPPRESS_AUDIT_LOG_KEY = "_suppress_audit_log"
-VALID_LAYERS = {"CMS-to-Landing", "Raw-to-Bronze", "Bronze-to-Silver"}
+VALID_LAYERS = {
+    "CMS-to-Landing",
+    "Raw-to-Bronze",
+    "Bronze-to-Silver",
+    "Silver-to-Gold",
+}
 VALID_LOAD_TYPES = {"full", "incremental"}
 VALID_STATUSES = {
     "SUCCESS",
@@ -49,6 +54,8 @@ LOG_SCHEMA = StructType(
         StructField("rows_quarantined", LongType(), False),
         StructField("error_message", StringType(), True),
         StructField("load_timestamp", TimestampType(), False),
+        StructField("pipeline_run_id", StringType(), True),
+        StructField("rows_aggregated", LongType(), True),
     ]
 )
 
@@ -184,10 +191,16 @@ def _validate_log_record(record: Mapping[str, Any]) -> None:
         "rows_updated",
         "rows_deleted",
         "rows_quarantined",
+        "rows_aggregated",
     ):
-        value = record[metric]
+        value = record.get(metric)
+        if metric == "rows_aggregated" and value is None:
+            continue
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise ValueError(f"{metric} must be a non-negative integer")
+    pipeline_run_id = record.get("pipeline_run_id")
+    if pipeline_run_id is not None and not isinstance(pipeline_run_id, str):
+        raise ValueError("pipeline_run_id must be a string or null")
 
 
 def append_typed_records(
@@ -210,6 +223,8 @@ def write_execution_log(spark: Any, log_table: str, record: Mapping[str, Any]) -
     """Validate and append one completed execution attempt."""
 
     normalized = dict(record)
+    normalized.setdefault("pipeline_run_id", None)
+    normalized.setdefault("rows_aggregated", 0)
     normalized["error_message"] = truncate_error(normalized.get("error_message"))
     _validate_log_record(normalized)
     append_typed_records(spark, log_table, [normalized], LOG_SCHEMA)
@@ -230,6 +245,8 @@ def completed_log_record(
     rows_updated: int = 0,
     rows_deleted: int = 0,
     rows_quarantined: int = 0,
+    pipeline_run_id: str | None = None,
+    rows_aggregated: int = 0,
     error_message: object | None = None,
     end_time: datetime | None = None,
 ) -> dict[str, Any]:
@@ -253,6 +270,8 @@ def completed_log_record(
         "rows_quarantined": rows_quarantined,
         "error_message": truncate_error(error_message),
         "load_timestamp": finished_at,
+        "pipeline_run_id": pipeline_run_id,
+        "rows_aggregated": rows_aggregated,
     }
     _validate_log_record(record)
     return record
@@ -279,6 +298,7 @@ def audited(
     load_type: str,
     parameter: str,
     batch_id: str = "",
+    pipeline_run_id: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Log one attempt on success or failure and re-raise processing errors."""
 
@@ -296,7 +316,9 @@ def audited(
         "rows_updated": 0,
         "rows_deleted": 0,
         "rows_quarantined": 0,
+        "rows_aggregated": 0,
         "error_message": None,
+        "pipeline_run_id": pipeline_run_id,
     }
     processing_error: Exception | None = None
     try:

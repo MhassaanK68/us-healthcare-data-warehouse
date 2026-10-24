@@ -6,6 +6,56 @@ The project uses public datasets from the Centers for Medicare & Medicaid Servic
 
 CareWatch is an analytical decision-support system. It does not provide medical advice or replace official CMS records.
 
+## Phase 3 Gold implementation
+
+The implemented Gold scope is documented in [`docs/gold_data_dictionary.md`](docs/gold_data_dictionary.md). It consists of five dimensions (`dim_facility`, `dim_date`, `dim_geography`, `dim_deficiency`, `dim_measure`), three detailed facts (`fact_deficiency`, `fact_penalty`, `fact_mds_quality`), the `agg_state_monthly_compliance` aggregate, and two sanitized operational views.
+
+### One-time deployment order
+
+The existing Phase 2 audit history must be preserved. Before running the updated setup notebook, execute this DDL once in a Databricks SQL cell:
+
+```sql
+SELECT COUNT(*) FROM carewatch.pipeline.pipeline_execution_logs;
+DESCRIBE TABLE carewatch.pipeline.pipeline_execution_logs;
+
+ALTER TABLE carewatch.pipeline.pipeline_execution_logs
+ADD COLUMNS (pipeline_run_id STRING, rows_aggregated BIGINT);
+```
+
+If one column was already added during a partial deployment, add only the missing column. Do not drop or recreate the table. Then run `notebooks/00_setup_tables.ipynb`; it verifies the existing control and Silver schemas and creates/verifies all nine Gold tables. Confirm the pre/post audit-row count is unchanged and historical rows have null values in the two new columns.
+
+### End-to-end Databricks Job
+
+Create one multi-task Job with this strict dependency chain:
+
+1. `01_acquire_cms.ipynb`
+2. `02_raw_to_bronze.ipynb`, dependent on task 1 success
+3. `03_bronze_to_silver.ipynb`, dependent on task 2 success
+4. `04_silver_to_gold.ipynb`, dependent on task 3 success
+
+Define one Job parameter named `pipeline_run_id` with the Databricks dynamic value `{{job.run_id}}`, and pass `{{job.parameters.pipeline_run_id}}` to the identically named widget on all four tasks. Pass the same catalog/schema and intended load type through the tasks. Preserve the existing address-secret scope/key parameters on the Silver task; never put secret values in Git or audit parameters.
+
+Raw-to-Bronze now raises an error when a file fails or an acquisition remains incomplete, so dependent Silver and Gold tasks cannot run on an invalid upstream scope. Gold always reads the complete current state of all four Silver tables and performs deterministic hash-aware MERGEs. It does not move the source watermark. An unchanged retry is expected to log zero Gold inserts, updates, and deletes.
+
+For a registered historical replay, use a separate unscheduled backfill Job containing tasks 02 → 03 → 04 with the same dependency gates and shared run ID. Set `reprocess=true` for Bronze and Silver, use the exact registered acquisition/batch scope, keep `allow_soft_deletes=false`, and pause the normal Job so both do not write concurrently.
+
+### Audit and acceptance query
+
+Gold writes one attempt with `pipeline_layer='Silver-to-Gold'`, `dataset='all'`, and `batch_id='gold:' + pipeline_run_id`. `rows_read` counts all four Silver inputs, and `rows_aggregated` counts active deficiency plus active penalty input rows. The inserted/updated/deleted fields are sums of actual Delta operation metrics across all Gold targets.
+
+```sql
+SELECT pipeline_run_id, pipeline_layer, dataset, batch_id, status,
+       start_time, end_time,
+       timestampdiff(SECOND, start_time, end_time) AS duration_seconds,
+       rows_read, rows_aggregated, rows_inserted, rows_updated, rows_deleted,
+       rows_quarantined, error_message
+FROM carewatch.pipeline.pipeline_execution_logs
+WHERE pipeline_run_id = '<actual-job-run-id>'
+ORDER BY start_time, pipeline_layer, dataset;
+```
+
+Save real full-run, incremental, unchanged-rerun, failure/repair, Bronze-gate, and Spark UI evidence under [`docs/evidence/phase3`](docs/evidence/phase3/README.md). Refresh Power BI only after task 4 succeeds; the nine table MERGEs are retry-safe but are not a single cross-table transaction.
+
 ## Project goals
 
 CareWatch is designed to help families, healthcare regulators, nursing-home operators, investors, and analysts answer questions such as:
