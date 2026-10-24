@@ -505,6 +505,126 @@ Primary key: `mds_key` (SHA-256 of the ordered business key: `cms_certification_
 
 <!-- END DATA MODELS -->
 
+## Pipeline control and quarantine tables
+
+The eight Bronze and Silver data tables are defined above. The six tables below complete the implemented `carewatch.pipeline` model (or the same table names in a different `catalog.schema`). Their authoritative `StructType` contracts are in [`src/carewatch/audit.py`](src/carewatch/audit.py). `00_setup_tables.ipynb` calls `ensure_control_tables` to create or verify them. **Nullable** describes the declared Delta column constraint; it does not mean every nullable field is expected to be empty. These tables have no declared SQL primary-key constraint; the pipeline enforces replay and checkpoint rules in code.
+
+### `pipeline_execution_logs`
+
+One attempt per pipeline layer and file/batch, including failures and retries. Use `pipeline_layer`, `dataset`, `batch_id`, `status`, and the row metrics to diagnose a run. A retry creates another log row rather than replacing its history.
+
+| Column | Type | Nullable | Meaning |
+| --- | --- | --- | --- |
+| `run_id` | `STRING` | No | Execution attempt identifier. |
+| `batch_id` | `STRING` | No | Source batch; empty for a failure before a batch is available. |
+| `pipeline_layer` | `STRING` | No | `CMS-to-Landing`, `Raw-to-Bronze`, or `Bronze-to-Silver`. |
+| `dataset` | `STRING` | No | Dataset registry name. |
+| `load_type` | `STRING` | No | `full` or `incremental`. |
+| `parameter_processed` | `STRING` | No | Source URL or the scoped parameters used for the attempt. |
+| `start_time` | `TIMESTAMP` | No | Attempt start time. |
+| `end_time` | `TIMESTAMP` | No | Attempt end time. |
+| `status` | `STRING` | No | `SUCCESS`, `SKIPPED_ALREADY_ACQUIRED`, `FAILURE`, or `QUARANTINED_PARTIAL`. |
+| `rows_read` | `BIGINT` | No | Source rows read for this attempt. |
+| `rows_inserted` | `BIGINT` | No | Rows inserted into the layer's target. |
+| `rows_updated` | `BIGINT` | No | Rows updated in the target. |
+| `rows_deleted` | `BIGINT` | No | Rows soft-deleted in Silver. |
+| `rows_quarantined` | `BIGINT` | No | Input rows rejected or quarantined. |
+| `error_message` | `STRING` | Yes | Failure detail, truncated to 2,000 characters. |
+| `load_timestamp` | `TIMESTAMP` | No | Time the log record was written. |
+
+### `source_file_manifest`
+
+Registers each acquired bulk file or API page and its lineage. Raw-to-Bronze selects work from this table instead of scanning the landing directory. An `acquisition_run_id` can cover multiple API-page `batch_id` values; each page has its own manifest row.
+
+| Column | Type | Nullable | Meaning |
+| --- | --- | --- | --- |
+| `acquisition_run_id` | `STRING` | No | Groups all artifacts from one dataset acquisition attempt. |
+| `dataset` | `STRING` | No | Dataset registry name. |
+| `dataset_id` | `STRING` | No | CMS dataset identifier. |
+| `load_type` | `STRING` | No | `full` or `incremental`. |
+| `as_of_date` | `DATE` | No | UTC date chosen as the acquisition upper bound. |
+| `acquisition_strategy` | `STRING` | No | `bulk_snapshot`, `snapshot_diff`, or `api_date_window`. |
+| `source_url` | `STRING` | No | CMS bulk distribution or API-page request URL. |
+| `source_catalog_modified` | `DATE` | Yes | CMS bulk publication modification date, when supplied. |
+| `window_start` | `DATE` | Yes | Inclusive API event-date lower bound. |
+| `window_end` | `DATE` | Yes | Inclusive API event-date upper bound. |
+| `page_offset` | `BIGINT` | Yes | API pagination offset; null for a bulk file. |
+| `landing_path` | `STRING` | No | Registered file path in the Unity Catalog Volume. |
+| `batch_id` | `STRING` | No | Deterministic, replayable source-batch identifier. |
+| `source_content_sha256` | `STRING` | No | Stable content identity used to detect an already acquired artifact. |
+| `source_file_sha256` | `STRING` | No | Digest of the physical landing file, checked before Bronze reads it. |
+| `source_bytes` | `BIGINT` | No | Landing-file size in bytes. |
+| `expected_run_rows` | `BIGINT` | Yes | CMS-reported total rows expected across the acquisition run. |
+| `source_rows` | `BIGINT` | Yes | Rows parsed for this file or page; set or verified during Bronze processing. |
+| `row_count_validated` | `BOOLEAN` | No | Whether the complete acquisition run passed Bronze reconciliation. |
+| `status` | `STRING` | No | Acquisition result, such as `SUCCESS` or `SKIPPED_ALREADY_ACQUIRED`. |
+| `error_message` | `STRING` | Yes | Acquisition error detail, when present. |
+| `load_timestamp` | `TIMESTAMP` | No | Manifest record time. |
+
+### `ingestion_watermarks`
+
+One extraction checkpoint per API event dataset (`health_deficiencies` and `penalties`). A complete, reconciled Raw-to-Bronze run advances it monotonically; Silver processing does not advance it. Provider and MDS snapshots do not use this API watermark.
+
+| Column | Type | Nullable | Meaning |
+| --- | --- | --- | --- |
+| `dataset` | `STRING` | No | API dataset registry name and logical checkpoint key. |
+| `watermark_column` | `STRING` | No | Source event-date field (`survey_date` or `penalty_date`). |
+| `watermark_value` | `DATE` | No | Last fully committed extraction window end. |
+| `last_successful_acquisition_run_id` | `STRING` | No | Acquisition run that supplied the checkpoint. |
+| `last_successful_bronze_run_id` | `STRING` | No | Raw-to-Bronze run that validated and committed it. |
+| `last_successful_silver_run_id` | `STRING` | Yes | Legacy compatibility field; not used as the extraction checkpoint. |
+| `load_timestamp` | `TIMESTAMP` | No | Checkpoint update time. |
+
+### `schema_drift_log`
+
+Records source-column changes detected while reading a registered file or API page. Added valid columns can extend Bronze; missing, invalid, reserved, or ambiguously mapped columns reject that artifact before a Bronze write.
+
+| Column | Type | Nullable | Meaning |
+| --- | --- | --- | --- |
+| `run_id` | `STRING` | No | Raw-to-Bronze execution attempt. |
+| `batch_id` | `STRING` | Yes | Source batch associated with the drift event. |
+| `dataset` | `STRING` | No | Dataset registry name. |
+| `source_file` | `STRING` | No | Landing file containing the observed column. |
+| `source_file_sha256` | `STRING` | Yes | Landing-file digest. |
+| `drift_type` | `STRING` | No | `ADDED_COLUMN`, `MISSING_COLUMN`, or `RENAMED_OR_UNMAPPED_COLUMN`. |
+| `column_name` | `STRING` | Yes | Affected source or provisional Bronze column. |
+| `detail` | `STRING` | No | Explanation of the drift decision. |
+| `load_timestamp` | `TIMESTAMP` | No | Drift-log record time. |
+
+### `bronze_quarantine`
+
+Stores malformed **CSV records** identified by Spark's permissive reader. Valid rows from the same file can still enter Bronze. A missing required source column instead rejects the file and is reported in `schema_drift_log` and execution logs.
+
+| Column | Type | Nullable | Meaning |
+| --- | --- | --- | --- |
+| `dataset` | `STRING` | No | Dataset registry name. |
+| `dataset_id` | `STRING` | No | CMS dataset identifier. |
+| `source_file` | `STRING` | No | Landing file containing the malformed record. |
+| `source_file_sha256` | `STRING` | No | Landing-file digest. |
+| `batch_id` | `STRING` | No | Source batch. |
+| `load_type` | `STRING` | No | `full` or `incremental`. |
+| `raw_record` | `STRING` | Yes | JSON rendering of parsed source fields where available. |
+| `corrupt_record` | `STRING` | Yes | Original malformed CSV text captured by Spark. |
+| `failed_rules` | `ARRAY<STRING>` | No | Contains `CORRUPT_CSV_RECORD`. |
+| `load_timestamp` | `TIMESTAMP` | No | Quarantine record time. |
+
+### `silver_quarantine`
+
+Stores source rows that fail Silver casts, required-field, format, domain, range, conditional, or same-key conflict checks. A retry does not append the same quarantine record twice. `raw_record` can contain clear-text source fields, so access to this table should be restricted just like Bronze and landing data.
+
+| Column | Type | Nullable | Meaning |
+| --- | --- | --- | --- |
+| `dataset` | `STRING` | No | Dataset registry name. |
+| `source_batch_id` | `STRING` | No | Bronze batch that supplied the row. |
+| `source_file` | `STRING` | No | Original landing file. |
+| `source_file_sha256` | `STRING` | No | Landing-file digest. |
+| `candidate_entity_key` | `STRING` | Yes | Deterministic key if the row has enough valid key fields. |
+| `raw_record` | `STRING` | No | JSON copy of the original source values. |
+| `failed_rules` | `ARRAY<STRING>` | No | All validation labels that rejected the row. |
+| `load_timestamp` | `TIMESTAMP` | No | Quarantine record time. |
+
+On an existing workspace, setup recognizes the old five-column `silver_quarantine` contract but does not migrate it automatically. `03_bronze_to_silver.ipynb` requires the current eight-column contract before writing Silver rows.
+
 ## Gold layer (planned)
 
 The planned Gold model contains:

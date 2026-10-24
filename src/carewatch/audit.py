@@ -139,10 +139,6 @@ SILVER_QUARANTINE_SCHEMA = StructType(
     ]
 )
 
-# Step 4 originally created a smaller placeholder before the locked Silver
-# contract was implemented.  Accepting that exact legacy shape during setup
-# keeps Raw-to-Bronze operational, but no migration is performed implicitly.
-# Step 7 must require the current schema before it writes Silver quarantine rows.
 LEGACY_SILVER_QUARANTINE_SCHEMA = StructType(
     [
         StructField("dataset", StringType(), False),
