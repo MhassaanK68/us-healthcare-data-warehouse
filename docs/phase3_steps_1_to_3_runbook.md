@@ -16,6 +16,7 @@ The code is complete, but the screenshots and result values must come from your 
 |---|---|
 | `src/carewatch/gold.py` | The reusable Gold implementation: schemas, keys, transformations, validations, nine idempotent Delta MERGEs, aggregate reconciliation, and two sanitized views. |
 | `notebooks/04_silver_to_gold.ipynb` | Thin Databricks orchestration. It receives widgets, opens one audit context, calls the reusable Gold refresh, and displays real Delta metrics/counts. |
+| `deployment/carewatch_daily_incremental.job.json` | Versioned four-task Git-backed Job, daily UTC schedule, parameters, success dependencies, and secret **names**. |
 | `docs/gold_data_dictionary.md` | The locked dimensional contract: grains, columns, PK/FK relationships, ER diagram, nullability, derivations, and BI meanings. |
 | `docs/evidence/phase3/README.md` | Checklist and location for real Phase 3 screenshots/query outputs. |
 | `docs/reports/README.md` | Location and contents expected for the later final PDF. |
@@ -120,9 +121,11 @@ Expected behavior:
 
 Run it a second time without changing Silver. All `rows_inserted`, `rows_updated`, and `rows_deleted` should be zero. Sample stable keys before and after and prove their `load_timestamp` is unchanged.
 
-## 7. Create the four-task Databricks Job
+## 7. Deploy the four-task Databricks Job
 
-Create a Job with these success dependencies:
+Deploy the versioned settings in `deployment/carewatch_daily_incremental.job.json` after the audit migration and Gold setup. The Job uses the Git repository's `main` branch and snapshots one commit for all tasks at run start. Its schedule is daily at 03:00 UTC with one concurrent run. Verify that the Job's Git reference points to the commit containing this implementation before enabling its schedule.
+
+The definition enforces these success dependencies:
 
 ```text
 01_acquire_cms
@@ -134,19 +137,21 @@ Create a Job with these success dependencies:
 04_silver_to_gold
 ```
 
-At Job level create parameter:
+The Job-level parameters are:
 
-| Name | Value |
+| Name | Default |
 |---|---|
-| `pipeline_run_id` | `{{job.run_id}}` |
+| `catalog` | `carewatch` |
+| `schema` | `pipeline` |
+| `load_type` | `incremental` |
 
-On every task, set its `pipeline_run_id` notebook parameter to:
+Databricks pushes those three parameters into the notebook widgets. Every task also receives this dynamic task parameter:
 
 ```text
-{{job.parameters.pipeline_run_id}}
+pipeline_run_id={{job.run_id}}
 ```
 
-Pass consistent `catalog`, `schema`, and intended load type. Keep the existing acquisition/Bronze/Silver parameters required by Phase 2. On the Silver task, pass secret **scope and key names**, never the secret value.
+The definition fixes the existing acquisition/Bronze/Silver parameters required by Phase 2. On the Silver task, it passes the existing secret **scope and key names**, never the secret value. Override the Job's `load_type` to `full` only for the first complete bootstrap.
 
 Important behavior:
 
@@ -156,6 +161,8 @@ Important behavior:
 - Gold starts only after task 3 succeeds.
 - Power BI Import refresh starts only after task 4 succeeds.
 - A failed Gold run can be retried against Silver; deterministic keys and hash-aware MERGE prevent duplicate facts.
+- A physical Silver row removal is reflected by deletion of the corresponding current-state Gold fact; a Silver soft delete is retained in Gold with `is_deleted=true`.
+- A facility-only bootstrap with no accepted event rows leaves `dim_date` and all facts empty without failing the refresh.
 
 ## 8. Run the acceptance evidence
 

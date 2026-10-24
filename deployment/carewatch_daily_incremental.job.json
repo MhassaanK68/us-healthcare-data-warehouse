@@ -1,0 +1,86 @@
+{
+  "name": "CareWatch Daily Incremental",
+  "git_source": {
+    "git_url": "https://github.com/MhassaanK68/us-healthcare-data-warehouse.git",
+    "git_provider": "gitHub",
+    "git_branch": "main"
+  },
+  "max_concurrent_runs": 1,
+  "queue": {
+    "enabled": true
+  },
+  "parameters": [
+    { "name": "catalog", "default": "carewatch" },
+    { "name": "schema", "default": "pipeline" },
+    { "name": "load_type", "default": "incremental" }
+  ],
+  "schedule": {
+    "quartz_cron_expression": "0 0 3 * * ?",
+    "timezone_id": "UTC",
+    "pause_status": "UNPAUSED"
+  },
+  "tasks": [
+    {
+      "task_key": "acquire_cms",
+      "notebook_task": {
+        "notebook_path": "notebooks/01_acquire_cms.ipynb",
+        "source": "GIT",
+        "base_parameters": {
+          "pipeline_run_id": "{{job.run_id}}",
+          "overlap_days": "60",
+          "force_refresh": "false",
+          "landing_root": "/Volumes/carewatch/pipeline/landing"
+        }
+      }
+    },
+    {
+      "task_key": "raw_to_bronze",
+      "depends_on": [{ "task_key": "acquire_cms" }],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "notebooks/02_raw_to_bronze.ipynb",
+        "source": "GIT",
+        "base_parameters": {
+          "pipeline_run_id": "{{job.run_id}}",
+          "dataset": "all",
+          "acquisition_run_id": "",
+          "source_path": "",
+          "reprocess": "false"
+        }
+      }
+    },
+    {
+      "task_key": "bronze_to_silver",
+      "depends_on": [{ "task_key": "raw_to_bronze" }],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "notebooks/03_bronze_to_silver.ipynb",
+        "source": "GIT",
+        "base_parameters": {
+          "pipeline_run_id": "{{job.run_id}}",
+          "dataset": "all",
+          "acquisition_run_id": "",
+          "batch_ids": "",
+          "ingest_from": "",
+          "ingest_to": "",
+          "reprocess": "false",
+          "allow_soft_deletes": "false",
+          "address_secret_scope": "carewatch-address-hashing",
+          "address_secret_key": "salt-v1"
+        }
+      }
+    },
+    {
+      "task_key": "silver_to_gold",
+      "depends_on": [{ "task_key": "bronze_to_silver" }],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "notebooks/04_silver_to_gold.ipynb",
+        "source": "GIT",
+        "base_parameters": {
+          "pipeline_run_id": "{{job.run_id}}"
+        }
+      }
+    }
+  ]
+}

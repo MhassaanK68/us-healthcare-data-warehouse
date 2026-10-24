@@ -31,14 +31,14 @@ Relationships are one-to-many and single direction from dimension to fact in Pow
 
 | Object | Grain | Primary key | Foreign keys | Source/refresh strategy |
 |---|---|---|---|---|
-| `dim_facility` | One row per distinct CCN seen in any Silver table | `facility_key` | None | Current Silver provider attributes plus placeholder rows for event-only CCNs; hash-aware MERGE |
-| `dim_date` | One calendar day from the earliest event month to latest event date | `date_key` | None | Regenerated date range; hash-aware MERGE |
+| `dim_facility` | One row per distinct CCN seen in any Silver table | `facility_key` | None | Current Silver provider attributes plus placeholder rows for event-only CCNs; hash-aware MERGE that removes CCNs absent from all four Silver tables |
+| `dim_date` | One calendar day from the earliest event month to latest event date | `date_key` | None | Regenerated date range; empty when no event dates exist; hash-aware MERGE |
 | `dim_geography` | One observed state code plus one unknown member | `state_key` | None | Distinct Silver states plus `__UNKNOWN__`; hash-aware MERGE |
 | `dim_deficiency` | One deficiency prefix/tag/category combination | `deficiency_type_key` | None | Distinct Silver deficiency types; hash-aware MERGE |
 | `dim_measure` | One measure code/resident type combination | `measure_key` | None | Latest unambiguous description from Silver; hash-aware MERGE |
-| `fact_deficiency` | One Silver deficiency/citation | `deficiency_key` | facility, survey date, geography, deficiency type | One row per Silver row, including soft-deleted rows; hash-aware MERGE |
-| `fact_penalty` | One Silver penalty event | `penalty_key` | facility, penalty date, geography | One row per Silver row, including soft-deleted rows; hash-aware MERGE |
-| `fact_mds_quality` | One CCN/measure/resident type/measure period | `mds_key` | facility, period-end date, geography, measure | One row per Silver row, including soft-deleted rows; hash-aware MERGE |
+| `fact_deficiency` | One Silver deficiency/citation | `deficiency_key` | facility, survey date, geography, deficiency type | One row per Silver row, including soft-deleted rows; hash-aware MERGE that removes rows physically absent from Silver |
+| `fact_penalty` | One Silver penalty event | `penalty_key` | facility, penalty date, geography | One row per Silver row, including soft-deleted rows; hash-aware MERGE that removes rows physically absent from Silver |
+| `fact_mds_quality` | One CCN/measure/resident type/measure period | `mds_key` | facility, period-end date, geography, measure | One row per Silver row, including soft-deleted rows; hash-aware MERGE that removes rows physically absent from Silver |
 | `agg_state_monthly_compliance` | One state/month having a citation or penalty | (`state_key`, `month_date_key`) | geography, date | Complete recomputation from active facts; MERGE plus removal of stale groups |
 
 ## Column contracts
@@ -190,7 +190,7 @@ Relationships are one-to-many and single direction from dimension to fact in Pow
 - `date_key = CAST(date_format(date, 'yyyyMMdd') AS INT)`.
 - Null event states map to the single `__UNKNOWN__` geography member.
 - `2025Q1-2025Q4` maps to period end `2025-12-31` and date key `20251231`; malformed or backwards periods fail the refresh.
-- The monthly aggregate excludes rows where `is_deleted=true`. Detailed facts retain them for lineage and idempotent correction history.
+- The monthly aggregate excludes rows where `is_deleted=true`. Detailed facts retain those Silver rows for lineage; a row physically removed from Silver is removed from its Gold fact on the next complete refresh.
 - A no-change rerun performs no Delta updates because the MERGE update condition compares `business_hash`; stable rows retain their original `load_timestamp`.
 - “Serious citations per 100 currently listed facilities” is serious citations during the last 12 complete calendar months divided by distinct currently listed facilities in the selected state, multiplied by 100. The event numerator uses fact geography; the denominator applies the selected state to `dim_facility.current_state_code` explicitly in the BI measure.
 - MDS measures must be filtered to a single `measure_key` before comparisons because different measures do not share a common meaning or scale.
@@ -203,5 +203,5 @@ Relationships are one-to-many and single direction from dimension to fact in Pow
 
 ## Refresh validation
 
-Before any write, the implementation checks exact staged columns, non-null and unique PKs, fact-to-Silver row-count equality, every FK, valid MDS periods, and aggregate-to-active-fact reconciliation. After all MERGEs, it rechecks deployed PK uniqueness, FK resolution, prohibited-column absence, and non-null load timestamps. A failure is logged and raised; Power BI should refresh only after the complete Gold task succeeds.
+Before any write, the implementation checks exact staged columns, non-null and unique PKs, fact-to-Silver row-count equality, every FK, valid MDS periods, and aggregate-to-active-fact reconciliation. After all MERGEs, it rechecks deployed PK uniqueness, FK resolution, prohibited-column absence, non-null load timestamps, and exact current-state key sets for the facility dimension, detailed facts, and monthly aggregate. A failure is logged and raised; Power BI should refresh only after the complete Gold task succeeds.
 

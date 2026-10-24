@@ -190,6 +190,17 @@ GOLD_PRIMARY_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 
+GOLD_CURRENT_STATE_TABLES = frozenset(
+    {
+        "dim_facility",
+        "fact_deficiency",
+        "fact_penalty",
+        "fact_mds_quality",
+        "agg_state_monthly_compliance",
+    }
+)
+
+
 GOLD_FOREIGN_KEYS: dict[str, tuple[tuple[str, str, str], ...]] = {
     "fact_deficiency": (
         ("facility_key", "dim_facility", "facility_key"),
@@ -363,8 +374,10 @@ def build_dim_date(spark: Any, deficiency: Any, penalty: Any, mds_with_period: A
         )
         .first()
     )
-    if not bounds or bounds["min_date"] is None or bounds["max_date"] is None:
-        raise GoldValidationError("Gold date dimension cannot be built without event dates")
+    if not bounds or (bounds["min_date"] is None and bounds["max_date"] is None):
+        return spark.createDataFrame([], GOLD_SCHEMAS["dim_date"])
+    if bounds["min_date"] is None or bounds["max_date"] is None:
+        raise GoldValidationError("Gold date bounds are inconsistent")
     start = bounds["min_date"].isoformat()
     end = bounds["max_date"].isoformat()
     dates = spark.sql(
@@ -882,7 +895,12 @@ def merge_gold_table(
     )
 
 
-def validate_deployed_gold(spark: Any, catalog: str, schema_name: str) -> tuple[dict[str, int | str], ...]:
+def validate_deployed_gold(
+    spark: Any,
+    catalog: str,
+    schema_name: str,
+    staged_outputs: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, int | str], ...]:
     from pyspark.sql import functions as F
 
     counts: list[dict[str, int | str]] = []
@@ -927,6 +945,21 @@ def validate_deployed_gold(spark: Any, catalog: str, schema_name: str) -> tuple[
             if missing:
                 raise GoldValidationError(
                     f"Deployed {fact_name}.{fact_column} has {missing} orphan key(s)"
+                )
+    if staged_outputs is not None:
+        # These tables represent the complete current Silver state. Dimensions
+        # such as dates may retain unused members, but current facilities and
+        # detailed/aggregate facts must have exactly the staged key set.
+        for name in sorted(GOLD_CURRENT_STATE_TABLES):
+            keys = GOLD_PRIMARY_KEYS[name]
+            staged_keys = staged_outputs[name].select(*keys)
+            deployed_keys = tables[name].select(*keys)
+            missing = staged_keys.join(deployed_keys, keys, "left_anti").limit(1).count()
+            stale = deployed_keys.join(staged_keys, keys, "left_anti").limit(1).count()
+            if missing or stale:
+                raise GoldValidationError(
+                    f"Deployed {name} key set differs from current Silver: "
+                    f"missing={bool(missing)}, stale={bool(stale)}"
                 )
     return tuple(counts)
 
@@ -1035,7 +1068,7 @@ def refresh_gold(
             outputs[name],
             gold_table_name(catalog, schema_name, name),
             GOLD_PRIMARY_KEYS[name],
-            delete_missing=name == "agg_state_monthly_compliance",
+            delete_missing=name in GOLD_CURRENT_STATE_TABLES,
         )
         inserted += metrics.rows_inserted
         updated += metrics.rows_updated
@@ -1053,7 +1086,7 @@ def refresh_gold(
             }
         )
 
-    table_counts = validate_deployed_gold(spark, catalog, schema_name)
+    table_counts = validate_deployed_gold(spark, catalog, schema_name, outputs)
     deploy_operational_views(spark, catalog, schema_name)
     return GoldRefreshResult(
         rows_read=rows_read,

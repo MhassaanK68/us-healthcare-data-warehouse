@@ -26,16 +26,16 @@ If one column was already added during a partial deployment, add only the missin
 
 ### End-to-end Databricks Job
 
-Create one multi-task Job with this strict dependency chain:
+The versioned Job settings are in [`deployment/carewatch_daily_incremental.job.json`](deployment/carewatch_daily_incremental.job.json). Deploy that definition after the audit migration and Gold setup. It schedules a Git-backed run daily at **03:00 UTC**, allows one run at a time, and uses this strict dependency chain:
 
 1. `01_acquire_cms.ipynb`
 2. `02_raw_to_bronze.ipynb`, dependent on task 1 success
 3. `03_bronze_to_silver.ipynb`, dependent on task 2 success
 4. `04_silver_to_gold.ipynb`, dependent on task 3 success
 
-Define one Job parameter named `pipeline_run_id` with the Databricks dynamic value `{{job.run_id}}`, and pass `{{job.parameters.pipeline_run_id}}` to the identically named widget on all four tasks. Pass the same catalog/schema and intended load type through the tasks. Preserve the existing address-secret scope/key parameters on the Silver task; never put secret values in Git or audit parameters.
+The Job parameters `catalog=carewatch`, `schema=pipeline`, and `load_type=incremental` are pushed into all four notebook tasks. Each task passes `{{job.run_id}}` to its `pipeline_run_id` widget. The Silver task passes the existing address-secret **scope and key names**; never put the secret value in Git or audit parameters. Override `load_type=full` for a one-time full bootstrap.
 
-Raw-to-Bronze now raises an error when a file fails or an acquisition remains incomplete, so dependent Silver and Gold tasks cannot run on an invalid upstream scope. Gold always reads the complete current state of all four Silver tables and performs deterministic hash-aware MERGEs. It does not move the source watermark. An unchanged retry is expected to log zero Gold inserts, updates, and deletes.
+Raw-to-Bronze now raises an error when a file fails or an acquisition remains incomplete, so dependent Silver and Gold tasks cannot run on an invalid upstream scope. Gold always reads the complete current state of all four Silver tables and performs deterministic hash-aware MERGEs. A physical Silver row removal removes the corresponding Gold fact, while a Silver soft delete remains a Gold fact flagged `is_deleted=true`. An empty event set yields an empty date dimension. Gold does not move the source watermark. An unchanged retry is expected to log zero Gold inserts, updates, and deletes.
 
 For a registered historical replay, use a separate unscheduled backfill Job containing tasks 02 → 03 → 04 with the same dependency gates and shared run ID. Set `reprocess=true` for Bronze and Silver, use the exact registered acquisition/batch scope, keep `allow_soft_deletes=false`, and pause the normal Job so both do not write concurrently.
 
