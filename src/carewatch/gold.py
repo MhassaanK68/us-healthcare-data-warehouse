@@ -951,7 +951,9 @@ def validate_deployed_gold(
         # such as dates may retain unused members, but current facilities and
         # detailed/aggregate facts must have exactly the staged key set.
         for name in sorted(GOLD_CURRENT_STATE_TABLES):
-            keys = GOLD_PRIMARY_KEYS[name]
+            # Spark Connect accepts a list of USING columns here; passing the
+            # schema contract's tuple is treated as a join expression instead.
+            keys = list(GOLD_PRIMARY_KEYS[name])
             staged_keys = staged_outputs[name].select(*keys)
             deployed_keys = tables[name].select(*keys)
             missing = staged_keys.join(deployed_keys, keys, "left_anti").limit(1).count()
