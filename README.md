@@ -4,11 +4,51 @@ CareWatch is a data engineering and business intelligence project for analysing 
 
 The project uses public datasets from the Centers for Medicare & Medicaid Services (CMS), processes them through a Bronze–Silver–Gold lakehouse architecture with PySpark and Delta Lake, and prepares business-ready data for Power BI.
 
+The [Phase 3 architecture and FinOps report](Architectural-Report.pdf) is a 13-page A4 portrait PDF covering the Gold model, the scheduled pipeline, Power BI, an observed Spark query profile, and measured serverless Job usage. Its supporting [run and cost record](docs/evidence/phase3/spark_finops_2026-10-25.md) identifies the Job, query, billing observations, and cost assumptions.
+
 CareWatch is an analytical decision-support system. It does not provide medical advice or replace official CMS records.
 
-## Phase 3 Gold implementation
+## Phase 3: Gold analytics and BI
 
-The implemented Gold scope is documented in [`docs/gold_data_dictionary.md`](docs/gold_data_dictionary.md). It consists of five dimensions (`dim_facility`, `dim_date`, `dim_geography`, `dim_deficiency`, `dim_measure`), three detailed facts (`fact_deficiency`, `fact_penalty`, `fact_mds_quality`), the `agg_state_monthly_compliance` aggregate, and two sanitized operational views.
+### Context and objective
+
+Phase 1 defined the nursing-home quality and compliance questions. Phase 2 made the four CMS feeds replayable, typed, privacy-treated, and auditable in Bronze and Silver. Phase 3 turns the **complete current Silver state** into a business-facing Gold dimensional model, refreshes it automatically after Silver, and serves Power BI through a Databricks SQL warehouse. The dashboard addresses facility, state, ownership, staffing, and regulatory questions; separate monitoring views expose pipeline health without releasing raw error records.
+
+### Implemented Gold data model
+
+Gold has five dimensions, three detailed facts, and one state-month aggregate. Each physical table is managed Delta with a stable analytical key, `business_hash`, and `load_timestamp`. The pipeline checks PK uniqueness, FK resolution, row-count reconciliation, and aggregate totals in code; Delta does not enforce those relationships here. The [Gold data dictionary and ER diagram](docs/gold_data_dictionary.md) contain the complete column contracts.
+
+| Gold table | Grain and key | Analytical role |
+| --- | --- | --- |
+| `dim_facility` | One CCN; `facility_key` | Latest accepted provider profile, ownership, rating, staffing, and current listing state. |
+| `dim_date` | One calendar day; `date_key` | Shared event and reporting calendar. |
+| `dim_geography` | One state code plus an unknown member; `state_key` | Event-state filtering. |
+| `dim_deficiency` | One deficiency prefix/tag/category; `deficiency_type_key` | Citation classification. |
+| `dim_measure` | One measure code/resident type; `measure_key` | MDS measure descriptions and populations. |
+| `fact_deficiency` | One Silver citation; `deficiency_key` | Citation count and serious-citation flag; FKs to facility, survey date, state, and deficiency type. |
+| `fact_penalty` | One Silver penalty; `penalty_key` | Fine dollars and payment-denial counts; FKs to facility, penalty date, and state. |
+| `fact_mds_quality` | One facility/measure/period; `mds_key` | Four-quarter quality score; FKs to facility, period-end date, state, and measure. |
+| `agg_state_monthly_compliance` | One state/month; (`state_key`, `month_date_key`) | Pre-aggregated active citation and penalty measures for state trends. |
+
+Power BI uses **one-to-many, single-direction** dimension-to-fact relationships. Facts are not joined directly to each other. `dim_facility` is current-state SCD1: ownership, rating, and staffing beside an older event describe the provider **now**, while event date and state come from the fact. `vw_gold_pipeline_runs` and `vw_gold_errors` are sanitized operational views and remain disconnected from the business star schema.
+
+### End-to-end workflow
+
+1. `01_acquire_cms.ipynb` obtains the four CMS feeds, registers landing files and checksums, and respects source watermarks.
+2. `02_raw_to_bronze.ipynb` loads source-shaped records with batch/file lineage. Failed or incomplete acquisition blocks downstream work.
+3. `03_bronze_to_silver.ipynb` applies explicit types, validation, deduplication, address hashing, quarantine, and idempotent Delta MERGEs.
+4. `04_silver_to_gold.ipynb` stages all five dimensions, three facts, and the monthly aggregate from the complete current Silver state; validates keys and reconciliations; then performs nine hash-aware MERGEs. A soft-deleted Silver event remains in its Gold fact with `is_deleted=true`, while a physically absent event is removed from Gold.
+5. The Gold task records one `Silver-to-Gold` audit attempt, including status, UTC duration, rows read, rows aggregated, and Delta row changes. It also deploys the two sanitized monitoring views. Power BI Import should refresh **after the Gold task succeeds**, not merely after Silver completes.
+
+The versioned [daily Job definition](deployment/carewatch_daily_incremental.job.json) runs these four tasks at 03:00 UTC with success dependencies and a shared `pipeline_run_id`. A repeat with unchanged inputs converges to zero Gold inserts, updates, and deletes. Each table MERGE commits separately, so a failed Gold task must be retried and validated before BI refresh.
+
+### BI and report artifacts
+
+- [Power BI project](BI/business-intelligence-dashboard.pbix): quality overview, facility/staffing, MDS quality, and pipeline monitoring pages sourced from Gold tables/views.
+- [Architecture and FinOps PDF](Architectural-Report.pdf): architecture flow, Gold model and Power BI ERD, scheduled-run evidence, a real (partial) Gold query-profile DAG, engineering decisions, and observed-versus-modeled cost.
+- [Phase 3 evidence index](docs/evidence/phase3/README.md): dashboard/model screenshots, run validation, query profile, and billing calculations.
+
+## Phase 3 deployment and operations
 
 ### One-time deployment order
 
@@ -87,16 +127,21 @@ The common facility join key is `cms_certification_number_ccn` (CCN).
 CMS API and bulk CSV files
             |
             v
+Landing: source files, checksums, manifest, and watermarks
+            |
+            v
 Bronze: raw source-shaped records and ingestion metadata
             |
             v
 Silver: typed, validated, privacy-treated, deduplicated records
             |
             v
-Gold: facts, dimensions, scorecards, and BI aggregates
+Gold: five dimensions, three facts, and a state-month aggregate
             |
             v
-Power BI dashboards
+Databricks SQL warehouse -> Power BI dashboards
+
+Audit logs and quarantine run alongside the data path.
 ```
 
 
@@ -675,51 +720,36 @@ Stores source rows that fail Silver casts, required-field, format, domain, range
 
 On an existing workspace, setup recognizes the old five-column `silver_quarantine` contract but does not migrate it automatically. `03_bronze_to_silver.ipynb` requires the current eight-column contract before writing Silver rows.
 
-## Gold layer (planned)
+## Gold model reference
 
-The planned Gold model contains:
-
-- `dim_facility`
-- `dim_geography`
-- `dim_date`
-- `dim_deficiency`
-- `fact_deficiency`
-- `fact_penalty`
-- `fact_facility_snapshot`
-- state-quality, ownership-comparison, facility-risk, and deficiency-trend aggregates
-
-Power BI should connect to Gold tables or approved aggregate views, not directly to raw source files.
+The implemented Gold tables and grains are summarized in [Phase 3: Gold analytics and BI](#phase-3-gold-analytics-and-bi); their complete schemas, PK/FK paths, business rules, and refresh checks are in the [Gold data dictionary](docs/gold_data_dictionary.md). The initial proposal's `fact_facility_snapshot` was not implemented because Silver keeps a current provider profile rather than a validated history of provider snapshots. Power BI connects to Gold tables and sanitized monitoring views, not to raw source files.
 
 ## Repository layout
 
 ```text
 us-healthcare-warehouse/
-├── data/
-│   ├── raw/                         # Original downloads; ignored by Git
-│   └── samples/
-│       ├── full_load/               # Historical CSV parts
-│       ├── incremental/             # Incremental API response samples
-│       └── samples_manifest.json    # Source, row-count, and file metadata
+├── BI/business-intelligence-dashboard.pbix
+├── deployment/carewatch_daily_incremental.job.json
 ├── docs/
 │   ├── data_analysis_project_proposal.md
 │   ├── phase2_guidelines.md
-│   ├── bronze_silver_schema_contract.md
-│   ├── phase2_evidence_walkthrough.md
-│   └── evidence/phase2_live_outputs.ipynb
+│   ├── phase3_guidelines.md
+│   ├── phase3_steps_1_to_3_runbook.md
+│   ├── gold_data_dictionary.md
+│   ├── evidence/phase2_live_outputs.ipynb
+│   └── evidence/phase3/              # Job, Spark, cost, and dashboard proof
+├── Architectural-Report.pdf
 ├── notebooks/
 │   ├── 00_setup_tables.ipynb
 │   ├── 01_acquire_cms.ipynb
 │   ├── 02_raw_to_bronze.ipynb
 │   ├── 03_bronze_to_silver.ipynb
-│   ├── 04_migrate_silver_quarantine.ipynb
+│   ├── 04_silver_to_gold.ipynb
 │   ├── 98_prepare_drift_demo.ipynb
-│   ├── 99_demo_idempotency_drift_backfill.ipynb
-│   ├── 99_phase2_submission_evidence.ipynb
-│   └── 99_export_phase2_evidence.ipynb
+│   └── 99_demo_idempotency_drift_backfill.ipynb
 ├── src/carewatch/
+├── scripts/build_phase3_report.py
 ├── scripts/refresh_readme_models.py
-├── initial_ingestion_samples/
-│   └── initial_fetch_for_samples.py
 ├── .gitignore
 └── README.md
 ```
@@ -728,7 +758,7 @@ The runnable PySpark transformation and orchestration code is in `notebooks/` an
 
 ## Preparing the sample data
 
-The files under `data/samples` are local profiling and schema-development evidence only. **They are not the Phase 2 full-load input and must not be uploaded to Databricks.** The production Phase 2 flow starts with an empty landing area; Databricks discovers and streams the official CMS bulk files itself and creates incremental landing pages through the CMS API.
+The files under `data/samples` are local profiling and schema-development evidence only. **They are not the production full-load input and must not be uploaded to Databricks.** The pipeline starts with an empty landing area; Databricks discovers and streams the official CMS bulk files itself and creates incremental landing pages through the CMS API.
 
 ### Prerequisites
 
@@ -857,7 +887,7 @@ After a run, inspect `carewatch.pipeline.pipeline_execution_logs` for `Raw-to-Br
 
 ## Submission evidence
 
-The rubric's saved-output proof is [phase2_live_outputs.ipynb](docs/evidence/phase2_live_outputs.ipynb). It contains actual Spark SQL results captured by [99_export_phase2_evidence.ipynb](notebooks/99_export_phase2_evidence.ipynb) in Databricks, with a final passing assertion. It covers physical schemas, `load_timestamp`, Silver key uniqueness, the first MERGE and no-op historical rerun, the isolated drift/quarantine run, and full/incremental execution logs. See the [evidence guide](docs/phase2_evidence_walkthrough.md) for job identifiers and reproduction steps.
+The rubric's saved-output proof is [phase2_live_outputs.ipynb](docs/evidence/phase2_live_outputs.ipynb). It contains actual Spark SQL results captured in Databricks, with a final passing assertion. It covers physical schemas, `load_timestamp`, Silver key uniqueness, the first MERGE and no-op historical rerun, the isolated drift/quarantine run, and full/incremental execution logs. See the [evidence guide](docs/phase2_evidence_walkthrough.md) for job identifiers and reproduction steps.
 
 ## Data quality and security
 
@@ -872,7 +902,13 @@ The rubric's saved-output proof is [phase2_live_outputs.ipynb](docs/evidence/pha
 
 ## Verification status
 
-The four-dataset acquisition, Raw-to-Bronze, and Bronze-to-Silver paths are implemented in code. The saved Databricks outputs confirm populated Bronze/Silver tables, unique Silver entity keys, non-null `load_timestamp`, full and incremental logs, a no-op reprocess, and the controlled drift run in `phase2_demo` with one accepted and one quarantined Silver row. Gold tables and Power BI dashboards are outside the Phase 2 submission scope.
+The [Phase 2 saved outputs](docs/evidence/phase2_live_outputs.ipynb) confirm populated Bronze/Silver tables, unique Silver entity keys, non-null `load_timestamp`, full/incremental logs, no-op reprocessing, and controlled drift/quarantine. The [Phase 3 deployment record](docs/evidence/phase3/deployment_validation_2026-10-24.md) confirms a four-task Job, Gold/Silver row reconciliation, an unchanged retry, and isolated empty/deletion tests. The [scheduled 25 October run](docs/evidence/phase3/spark_finops_2026-10-25.md) succeeded in 489.320 seconds; its Gold audit logged 698,750 Silver rows read, 434,330 active event rows aggregated, and zero Gold mutations on unchanged input.
+
+### Phase 3 submission package (25 October 2026)
+
+- **GitHub repository:** Submit the [repository on `main`](https://github.com/MhassaanK68/us-healthcare-data-warehouse), which contains the end-to-end notebooks, versioned Job definition, Gold model, evidence, and report source.
+- **BI deliverable:** Submit [the saved Power BI file](BI/business-intelligence-dashboard.pbix). It contains four pages: Quality Overview, Facility and Staffing, MDS Quality, and Pipeline Health & Data Quality. The monitoring page includes audit run status and an error-count card. Its saved capture predates the latest warehouse audit count (53 versus 61 records), so refresh the PBIX after a successful Gold run when presenting current numbers.
+- **Architectural PDF:** Submit the [A4 portrait report](Architectural-Report.pdf). It contains the architecture, Gold model, Power BI ERD, scheduled Job timeline, Spark operator analysis, and observed/estimated FinOps costs. The supplied query-profile screenshot covers a date-key MERGE path. A full fact-transformation Spark UI capture would illustrate the instructor's most-complex-transformation criterion more directly.
 
 
 
@@ -880,7 +916,12 @@ The four-dataset acquisition, Raw-to-Bronze, and Bronze-to-Silver paths are impl
 
 - [Project proposal](docs/data_analysis_project_proposal.md)
 - [Phase 2 implementation guidelines](docs/phase2_guidelines.md)
-- [Bronze and Silver schema contract](docs/bronze_silver_schema_contract.md)
+- [Bronze and Silver data models](#bronze-and-silver-data-models)
+- [Phase 3 guidelines](docs/phase3_guidelines.md)
+- [Phase 3 deployment runbook](docs/phase3_steps_1_to_3_runbook.md)
+- [Gold data dictionary and ER diagram](docs/gold_data_dictionary.md)
+- [Phase 3 evidence](docs/evidence/phase3/README.md)
+- [Final architecture and FinOps report](Architectural-Report.pdf)
 
 
 

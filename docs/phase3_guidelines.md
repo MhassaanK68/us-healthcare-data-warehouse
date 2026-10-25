@@ -256,7 +256,7 @@ Run `00_setup_tables.ipynb` once during deployment, outside this daily schedule,
 
 ### 4.3 Enforce failure gates at every boundary
 
-The existing `01_acquire_cms.ipynb` raises when any acquisition fails, and `03_bronze_to_silver.ipynb` raises after recording failed batches. **`02_raw_to_bronze.ipynb` is the gap:** today it displays `file_failures` and incomplete `reconciliations` but merely prints a message, so Databricks can mark its task successful. Change its final branch to raise `RuntimeError` **after** displaying the evidence whenever `file_failures` or `partial_runs` is nonempty. Keep the already committed successful files and their audit records; the retry selects only pending work. Without this code change, do not activate the dependent Job.
+The deployed `01_acquire_cms.ipynb` raises when any acquisition fails, `02_raw_to_bronze.ipynb` raises after displaying evidence when `file_failures` or `partial_runs` is nonempty, and `03_bronze_to_silver.ipynb` raises after recording failed batches. Already committed successful files and their audit records remain available; a retry selects only pending work. The dependent daily Job is active with these failure gates.
 
 The resulting release gates are:
 
