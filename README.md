@@ -16,7 +16,7 @@ Phase 1 defined the nursing-home quality and compliance questions. Phase 2 made 
 
 ### Implemented Gold data model
 
-Gold has five dimensions, three detailed facts, and one state-month aggregate. Each physical table is managed Delta with a stable analytical key, `business_hash`, and `load_timestamp`. The pipeline checks PK uniqueness, FK resolution, row-count reconciliation, and aggregate totals in code; Delta does not enforce those relationships here. The [Gold data dictionary and ER diagram](docs/gold_data_dictionary.md) contain the complete column contracts.
+Gold has five dimensions, three detailed facts, and one state-month aggregate. Each physical table is managed Delta with a stable analytical key, `business_hash`, and `load_timestamp`. The pipeline checks PK uniqueness, FK resolution, row-count reconciliation, and aggregate totals in code; Delta does not enforce those relationships here.
 
 | Gold table | Grain and key | Analytical role |
 | --- | --- | --- |
@@ -160,7 +160,7 @@ Sensitive contact fields are excluded from Silver. Street addresses are hashed w
 
 ## Bronze and Silver data models
 
-These column lists are generated from the explicit `StructType` contracts in `src/carewatch/schemas.py`. Run `python scripts/refresh_readme_models.py` after a deliberate schema change.
+These column lists follow the explicit `StructType` contracts in `src/carewatch/schemas.py`.
 
 Bronze stores every CMS source field as a nullable `STRING`; its seven ingestion fields have the types shown below. Bronze retains source duplicates and therefore has **no enforced row primary key**. `_batch_id` identifies a replayable source batch, while the listed business-key columns identify candidate entities within a validated source snapshot. Silver has one deterministic SHA-256 primary key per table and applies Delta `MERGE` on it.
 
@@ -722,7 +722,7 @@ On an existing workspace, setup recognizes the old five-column `silver_quarantin
 
 ## Gold model reference
 
-The implemented Gold tables and grains are summarized in [Phase 3: Gold analytics and BI](#phase-3-gold-analytics-and-bi); their complete schemas, PK/FK paths, business rules, and refresh checks are in the [Gold data dictionary](docs/gold_data_dictionary.md). The initial proposal's `fact_facility_snapshot` was not implemented because Silver keeps a current provider profile rather than a validated history of provider snapshots. Power BI connects to Gold tables and sanitized monitoring views, not to raw source files.
+The implemented Gold tables and grains are summarized in [Phase 3: Gold analytics and BI](#phase-3-gold-analytics-and-bi). The initial proposal's `fact_facility_snapshot` was not implemented because Silver keeps a current provider profile rather than a validated history of provider snapshots. Power BI connects to Gold tables and sanitized monitoring views, not to raw source files.
 
 ## Repository layout
 
@@ -732,11 +732,6 @@ us-healthcare-warehouse/
 ├── deployment/carewatch_daily_incremental.job.json
 ├── docs/
 │   ├── data_analysis_project_proposal.md
-│   ├── phase2_guidelines.md
-│   ├── phase3_guidelines.md
-│   ├── phase3_steps_1_to_3_runbook.md
-│   ├── gold_data_dictionary.md
-│   ├── evidence/phase2_live_outputs.ipynb
 │   └── evidence/phase3/              # Job, Spark, cost, and dashboard proof
 ├── Architectural-Report.pdf
 ├── notebooks/
@@ -748,64 +743,11 @@ us-healthcare-warehouse/
 │   ├── 98_prepare_drift_demo.ipynb
 │   └── 99_demo_idempotency_drift_backfill.ipynb
 ├── src/carewatch/
-├── scripts/build_phase3_report.py
-├── scripts/refresh_readme_models.py
 ├── .gitignore
 └── README.md
 ```
 
-The runnable PySpark transformation and orchestration code is in `notebooks/` and `src/carewatch/`. The local contract tests validate schemas without a Databricks runtime.
-
-## Preparing the sample data
-
-The files under `data/samples` are local profiling and schema-development evidence only. **They are not the production full-load input and must not be uploaded to Databricks.** The pipeline starts with an empty landing area; Databricks discovers and streams the official CMS bulk files itself and creates incremental landing pages through the CMS API.
-
-### Prerequisites
-
-- Python 3.10 or later
-- `requests`
-- Internet access to `data.cms.gov`
-
-Install the ingestion dependency:
-
-```bash
-python -m pip install requests
-```
-
-Download the CMS bulk files, split them into GitHub-safe parts, and create incremental samples:
-
-```bash
-python initial_ingestion_samples/initial_fetch_for_samples.py
-```
-
-The script defaults to:
-
-- storing original downloads in `data/raw/`;
-- storing version-controlled samples in `data/samples/`;
-- keeping each CSV part below 45 MiB;
-- requiring more than 210 MiB of historical sample data;
-- using `2026-07-01` as the deficiency cutoff;
-- using `2026-06-01` as the penalty cutoff;
-- limiting each incremental API sample to 5,000 rows.
-
-To rebuild the samples from files already present in `data/raw/` without downloading them again:
-
-```bash
-python initial_ingestion_samples/initial_fetch_for_samples.py --reuse
-```
-
-Useful overrides include:
-
-```bash
-python initial_ingestion_samples/initial_fetch_for_samples.py \
-  --cutoff 2026-07-01 \
-  --penalty-cutoff 2026-06-01 \
-  --part-mb 45 \
-  --min-mb 210 \
-  --incr-rows 5000
-```
-
-Do not commit `data/raw/`. The generated manifest records the CMS dataset IDs, source URLs, catalog dates, split cutoffs, row counts, part sizes, and incremental filters.
+The runnable PySpark transformation and orchestration code is in `notebooks/` and `src/carewatch/`. The pipeline starts with an empty landing area; Databricks discovers and streams the official CMS bulk files itself and creates incremental landing pages through the CMS API.
 
 ## Phase 2 engineering requirements
 
@@ -824,8 +766,6 @@ The Bronze and Silver implementation must satisfy the following requirements:
 11. Detect schema drift and either evolve compatible schemas deliberately or quarantine incompatible data.
 12. Record acquisition manifests, watermarks, run status, timing, parameters, and row metrics.
 13. Demonstrate automated full-load, incremental, idempotency, schema-drift, quarantine, and backfill scenarios.
-
-See [Phase 2 guidelines](docs/phase2_guidelines.md) for the implementation sequence and evidence checklist.
 
 ### Running Raw-to-Bronze
 
@@ -885,10 +825,6 @@ Run these notebooks from a Databricks Git folder containing this repository. Use
 
 After a run, inspect `carewatch.pipeline.pipeline_execution_logs` for `Raw-to-Bronze` and `Bronze-to-Silver` rows with the selected parameter, start/end times, status, and inserted/updated counts. Rerun the same Silver batch with `reprocess=true` and verify `rows_inserted=0`, `rows_updated=0`, unchanged Silver row count, and unchanged `load_timestamp` for matching keys. `notebooks/99_demo_idempotency_drift_backfill.ipynb` displays scoped manifest, count, drift, quarantine, and log views; set its `dataset` and optional `acquisition_run_id`/`batch_id` widgets to the run being demonstrated.
 
-## Submission evidence
-
-The rubric's saved-output proof is [phase2_live_outputs.ipynb](docs/evidence/phase2_live_outputs.ipynb). It contains actual Spark SQL results captured in Databricks, with a final passing assertion. It covers physical schemas, `load_timestamp`, Silver key uniqueness, the first MERGE and no-op historical rerun, the isolated drift/quarantine run, and full/incremental execution logs. See the [evidence guide](docs/phase2_evidence_walkthrough.md) for job identifiers and reproduction steps.
-
 ## Data quality and security
 
 - Telephone numbers must not be published to Silver or Gold.
@@ -902,11 +838,11 @@ The rubric's saved-output proof is [phase2_live_outputs.ipynb](docs/evidence/pha
 
 ## Verification status
 
-The [Phase 2 saved outputs](docs/evidence/phase2_live_outputs.ipynb) confirm populated Bronze/Silver tables, unique Silver entity keys, non-null `load_timestamp`, full/incremental logs, no-op reprocessing, and controlled drift/quarantine. The [Phase 3 deployment record](docs/evidence/phase3/deployment_validation_2026-10-24.md) confirms a four-task Job, Gold/Silver row reconciliation, an unchanged retry, and isolated empty/deletion tests. The [scheduled 25 October run](docs/evidence/phase3/spark_finops_2026-10-25.md) succeeded in 489.320 seconds; its Gold audit logged 698,750 Silver rows read, 434,330 active event rows aggregated, and zero Gold mutations on unchanged input.
+The [Phase 3 deployment record](docs/evidence/phase3/deployment_validation_2026-10-24.md) confirms a four-task Job, Gold/Silver row reconciliation, an unchanged retry, and isolated empty/deletion tests. The [scheduled 25 October run](docs/evidence/phase3/spark_finops_2026-10-25.md) succeeded in 489.320 seconds; its Gold audit logged 698,750 Silver rows read, 434,330 active event rows aggregated, and zero Gold mutations on unchanged input.
 
 ### Phase 3 submission package (25 October 2026)
 
-- **GitHub repository:** Submit the [repository on `main`](https://github.com/MhassaanK68/us-healthcare-data-warehouse), which contains the end-to-end notebooks, versioned Job definition, Gold model, evidence, and report source.
+- **GitHub repository:** Submit the [repository on `main`](https://github.com/MhassaanK68/us-healthcare-data-warehouse), which contains the end-to-end notebooks, versioned Job definition, Gold model, Phase 3 evidence, and the architecture report.
 - **BI deliverable:** Submit [the saved Power BI file](BI/business-intelligence-dashboard.pbix). It contains four pages: Quality Overview, Facility and Staffing, MDS Quality, and Pipeline Health & Data Quality. The monitoring page includes audit run status and an error-count card. Its saved capture predates the latest warehouse audit count (53 versus 61 records), so refresh the PBIX after a successful Gold run when presenting current numbers.
 - **Architectural PDF:** Submit the [A4 portrait report](Architectural-Report.pdf). It contains the architecture, Gold model, Power BI ERD, scheduled Job timeline, Spark operator analysis, and observed/estimated FinOps costs. The supplied query-profile screenshot covers a date-key MERGE path. A full fact-transformation Spark UI capture would illustrate the instructor's most-complex-transformation criterion more directly.
 
@@ -915,11 +851,7 @@ The [Phase 2 saved outputs](docs/evidence/phase2_live_outputs.ipynb) confirm pop
 ## Documentation
 
 - [Project proposal](docs/data_analysis_project_proposal.md)
-- [Phase 2 implementation guidelines](docs/phase2_guidelines.md)
 - [Bronze and Silver data models](#bronze-and-silver-data-models)
-- [Phase 3 guidelines](docs/phase3_guidelines.md)
-- [Phase 3 deployment runbook](docs/phase3_steps_1_to_3_runbook.md)
-- [Gold data dictionary and ER diagram](docs/gold_data_dictionary.md)
 - [Phase 3 evidence](docs/evidence/phase3/README.md)
 - [Final architecture and FinOps report](Architectural-Report.pdf)
 
