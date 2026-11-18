@@ -271,13 +271,6 @@ BRONZE_SCHEMAS = {
     for dataset, schema in SOURCE_SCHEMAS.items()
 }
 
-
-# ---------------------------------------------------------------------------
-# Silver contracts
-# ---------------------------------------------------------------------------
-# These definitions are deliberately declarative.  Step 7 will consume them,
-# but this module does not clean, cast, quarantine, or write any data.
-
 SILVER_LINEAGE = StructType(
     [
         StructField("row_hash", StringType(), nullable=False),
@@ -723,8 +716,6 @@ CONFLICTING_KEY_POLICY = (
 
 @dataclass(frozen=True)
 class SilverValidationSpec:
-    """Declarative Step 6 rules consumed by future Step 7 transformations."""
-
     dataset: str
     table_name: str
     entity_key: str

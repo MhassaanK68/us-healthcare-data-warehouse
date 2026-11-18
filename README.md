@@ -106,8 +106,6 @@ CareWatch is designed to help families, healthcare regulators, nursing-home oper
 - Which facilities receive the largest fines or payment denials?
 - How do deficiencies, penalties, and quality measures change over time?
 
-
-
 ## Data sources
 
 The source is the [CMS Provider Data Catalog](https://data.cms.gov/provider-data/), accessed through its bulk CSV downloads and public APIs.
@@ -144,8 +142,6 @@ Databricks SQL warehouse -> Power BI dashboards
 Audit logs and quarantine run alongside the data path.
 ```
 
-
-
 ### Bronze
 
 Bronze preserves source values as strings and adds operational metadata such as the source file, batch ID, load type, ingestion date, and `load_timestamp`. Distinct batches append logically; an explicit rerun atomically replaces only the same deterministic batch so ingestion remains auditable and idempotent.
@@ -156,7 +152,7 @@ Silver applies explicit data types, standardises names and categories, validates
 
 Sensitive contact fields are excluded from Silver. Street addresses are hashed with a salt supplied through Databricks Secrets.
 
-<!-- BEGIN DATA MODELS -->
+
 
 ## Bronze and Silver data models
 
@@ -598,7 +594,7 @@ Primary key: `mds_key` (SHA-256 of the ordered business key: `cms_certification_
 | `source_processing_date` | `DATE` | Yes |  |
 | `load_timestamp` | `TIMESTAMP` | No |  |
 
-<!-- END DATA MODELS -->
+
 
 ## Pipeline control and quarantine tables
 
@@ -834,19 +830,15 @@ After a run, inspect `carewatch.pipeline.pipeline_execution_logs` for `Raw-to-Br
 - Raw source values and ingestion lineage must remain available for auditing.
 - Missing numeric values must remain null rather than being converted to zero.
 
-
-
 ## Verification status
 
 The [Phase 3 deployment record](docs/evidence/phase3/deployment_validation_2026-10-24.md) confirms a four-task Job, Gold/Silver row reconciliation, an unchanged retry, and isolated empty/deletion tests. The [scheduled 25 October run](docs/evidence/phase3/spark_finops_2026-10-25.md) succeeded in 489.320 seconds; its Gold audit logged 698,750 Silver rows read, 434,330 active event rows aggregated, and zero Gold mutations on unchanged input.
 
 ### Phase 3 submission package (25 October 2026)
 
-- **GitHub repository:** Submit the [repository on `main`](https://github.com/MhassaanK68/us-healthcare-data-warehouse), which contains the end-to-end notebooks, versioned Job definition, Gold model, Phase 3 evidence, and the architecture report.
+- **GitHub repository:** Submit the [repository on](https://github.com/MhassaanK68/us-healthcare-data-warehouse) `main`, which contains the end-to-end notebooks, versioned Job definition, Gold model, Phase 3 evidence, and the architecture report.
 - **BI deliverable:** Submit [the saved Power BI file](BI/business-intelligence-dashboard.pbix). It contains four pages: Quality Overview, Facility and Staffing, MDS Quality, and Pipeline Health & Data Quality. The monitoring page includes audit run status and an error-count card. Its saved capture predates the latest warehouse audit count (53 versus 61 records), so refresh the PBIX after a successful Gold run when presenting current numbers.
 - **Architectural PDF:** Submit the [A4 portrait report](Architectural-Report.pdf). It contains the architecture, Gold model, Power BI ERD, scheduled Job timeline, Spark operator analysis, and observed/estimated FinOps costs. The supplied query-profile screenshot covers a date-key MERGE path. A full fact-transformation Spark UI capture would illustrate the instructor's most-complex-transformation criterion more directly.
-
-
 
 ## Documentation
 
@@ -854,8 +846,6 @@ The [Phase 3 deployment record](docs/evidence/phase3/deployment_validation_2026-
 - [Bronze and Silver data models](#bronze-and-silver-data-models)
 - [Phase 3 evidence](docs/evidence/phase3/README.md)
 - [Final architecture and FinOps report](Architectural-Report.pdf)
-
-
 
 ## Team
 
